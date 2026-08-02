@@ -10,7 +10,8 @@ Save a link from your phone's share sheet or your browser toolbar, and rightread
 strips the page down to the article — no ads, no cookie banners, no newsletter
 popups — and keeps it readable offline, in typography built for long reading.
 
-No AI, no summaries, no tagging. Capture, extract, read, prioritise.
+Capture, extract, read, prioritise. Pages are classified on arrival so a
+discussion thread and an essay can be treated as the different things they are.
 
 ---
 
@@ -56,6 +57,8 @@ the server console** — copy it from there.
 | `AUTH_TRUST_HOST` | `true`. Lets the sign-in link follow the host you opened. |
 | `AUTH_RESEND_KEY` | Resend API key. Blank ⇒ link logged to the console. |
 | `EMAIL_FROM` | Sender address for those emails. |
+| `OPENROUTER_API_KEY` | OpenRouter key. Without it classification degrades to `other`; nothing breaks. |
+| `OPENROUTER_MODEL` | Defaults to `openai/gpt-5.6-luna`. One model for all of rightread. |
 
 ### Signing in from your phone on a LAN
 
@@ -95,6 +98,37 @@ curl -X POST https://your-host/api/capture \
   -d '{"url":"https://example.com/article"}'
 ```
 
+## Classification
+
+Every saved page is classified on capture into one of five kinds —
+`conversation`, `article`, `blog`, `reference`, `other` — which will select the
+summary prompt. Three layers, in order:
+
+1. **URL rules** (`src/lib/classify/rules.ts`) — about ten hosts where
+   extraction is known to fail. This is not an optimisation: a server-side fetch
+   of Reddit returns an 8 KB JavaScript shell, and in evaluation **5 of 9
+   rule-matched URLs failed extraction entirely** (HN 429, Stack Overflow 403,
+   Reddit and YouTube unreadable). For those the URL is the only signal there is.
+2. **The model** — everything else, from title, URL and the first ~6 KB of
+   extracted text. Handles the long tail no rule table reaches.
+3. **`other`** — whenever the model is unavailable. Classification never throws
+   and never blocks a capture.
+
+A manual override in the UI sets `kindSource: "user"` and is never recomputed.
+
+**Measured accuracy: 44/44** across a 29-URL tuning set and a 15-URL held-out
+set the prompt was never adjusted against. ~1.3 s median, **$0.000138 per page**.
+
+```bash
+npm run eval:classify                                 # tuning set
+npm run eval:classify -- --fixture holdout-urls.json  # held-out set
+npm run eval:classify -- --only rule                  # offline, no spend
+```
+
+The eval runs the *real* pipeline — same fetch, extraction and sanitising as
+production — because feeding the classifier hand-cleaned text would measure
+something easier than what ships.
+
 ## How it works
 
 | Area | Where |
@@ -106,6 +140,8 @@ curl -X POST https://your-host/api/capture \
 | Ordering | `src/lib/reorder.ts` — sparse float positions |
 | Reader | `src/app/read/[id]`, `.prose-reader` in `globals.css` |
 | Offline | `public/sw.js` |
+| Classification | `src/lib/classify/` — rules, prompt, orchestration |
+| LLM access | `src/lib/openrouter.ts` — one model, retried once on transient faults |
 
 **Ordering** uses sparse floats: a move sets the item's position to the midpoint
 of its new neighbours, so it writes one row rather than renumbering the list.

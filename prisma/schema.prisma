@@ -102,6 +102,14 @@ model Item {
   extractError  String?
   extractedAt   DateTime?
 
+  /// conversation | article | blog | reference | other — selects the summary prompt
+  kind           String  @default("other")
+  /// 0-1. Only a deterministic URL rule earns 1; the model is capped below it.
+  kindConfidence Float   @default(0)
+  /// user | url | llm | none — provenance, so a wrong answer is diagnosable
+  kindSource     String  @default("none")
+  kindReason     String?
+
   /// unread | archived
   status   String    @default("unread")
   /// A marker you can filter by — deliberately NOT an ordering bucket.
@@ -122,5 +130,6 @@ model Item {
   @@unique([userId, url])
   @@index([userId, status, position])
   @@index([userId, starred])
+  @@index([userId, kind])
   @@index([userId, savedAt])
 }

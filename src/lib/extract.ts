@@ -1,7 +1,7 @@
 import { JSDOM, VirtualConsole } from "jsdom";
 import { Readability, isProbablyReaderable } from "@mozilla/readability";
-import { sanitizeArticleHtml } from "@/lib/sanitize";
-import { tidyArticleHtml } from "@/lib/tidy";
+import { sanitizeArticleHtml } from "./sanitize";
+import { tidyArticleHtml } from "./tidy";
 
 export type Extracted = {
   title: string;

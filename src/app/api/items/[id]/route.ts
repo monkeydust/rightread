@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
 import { moveItem, setStarred } from "@/lib/reorder";
+import { isKind } from "@/lib/classify";
 import { runExtraction } from "@/lib/capture";
 
 /**
@@ -9,6 +10,7 @@ import { runExtraction } from "@/lib/capture";
  * Body is one of:
  *   { move: "up" | "down" | "top" | "bottom" }
  *   { starred: boolean }
+ *   { kind: "conversation" | "article" | "blog" | "reference" | "other" }
  *   { status: "unread" | "archived" }
  *   { progress: 0..1 }
  *   { retry: true }
@@ -43,6 +45,24 @@ export async function PATCH(
       }
       const moved = await moveItem(userId, id, body.move as "up");
       return Response.json({ ok: true, moved });
+    }
+
+    if (typeof body.kind === "string") {
+      if (!isKind(body.kind)) {
+        return Response.json({ error: "Invalid kind" }, { status: 400 });
+      }
+      // A manual override is final: kindSource "user" stops re-classification
+      // from ever running again for this item.
+      await prisma.item.update({
+        where: { id },
+        data: {
+          kind: body.kind,
+          kindSource: "user",
+          kindConfidence: 1,
+          kindReason: "set by you",
+        },
+      });
+      return Response.json({ ok: true });
     }
 
     if (typeof body.starred === "boolean") {

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import type { ListItem } from "@/lib/items";
 import { hostLabel } from "@/lib/url";
+import { KINDS } from "@/lib/classify/kinds";
 import { ArrowUp, ArrowDown, Star, Check, Undo, Trash } from "@/components/icons";
 
 type Props = {
@@ -13,6 +14,7 @@ type Props = {
   busy: boolean;
   onMove: (id: string, move: "up" | "down" | "top" | "bottom") => void;
   onStar: (id: string, starred: boolean) => void;
+  onKind: (id: string, kind: string) => void;
   onArchive: (id: string, archived: boolean) => void;
   onDelete: (id: string) => void;
   onRetry: (id: string) => void;
@@ -74,6 +76,7 @@ export function ItemRow({
   busy,
   onMove,
   onStar,
+  onKind,
   onArchive,
   onDelete,
   onRetry,
@@ -137,6 +140,47 @@ export function ItemRow({
           className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]"
           style={{ color: "var(--text-muted)" }}
         >
+          {/* Kind doubles as its own override control — a plain select, so
+              correcting a misclassification is one tap and it sticks. */}
+          <span className="relative inline-flex items-center">
+            <select
+              value={item.kind}
+              onChange={(e) => onKind(item.id, e.target.value)}
+              aria-label={`Page type: ${item.kind}${
+                item.kindSource === "user" ? " (set by you)" : ""
+              }. Change it`}
+              title={
+                item.kindSource === "user"
+                  ? "Set by you"
+                  : `Detected via ${item.kindSource}${
+                      item.kindConfidence
+                        ? ` (${Math.round(item.kindConfidence * 100)}% confident)`
+                        : ""
+                    }`
+              }
+              className="cursor-pointer appearance-none rounded border bg-transparent py-0 pl-1.5 pr-1.5 text-[11px] leading-[1.4] outline-none"
+              style={{
+                borderColor:
+                  item.kindSource === "user" ? "var(--accent)" : "var(--border)",
+                color:
+                  item.kindSource === "user" ? "var(--accent)" : "var(--text-muted)",
+                // A low-confidence guess should look like one.
+                opacity:
+                  item.kindSource === "none" ||
+                  (item.kindSource === "llm" && item.kindConfidence < 0.5)
+                    ? 0.55
+                    : 1,
+              }}
+            >
+              {KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </select>
+          </span>
+          <span aria-hidden>·</span>
+
           {/* The source doubles as the escape hatch to the real page. */}
           <a
             href={item.url}

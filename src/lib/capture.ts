@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { normalizeUrl, hostLabel } from "@/lib/url";
 import { extractArticle } from "@/lib/extract";
+import { classifyPage, type PageEvidence } from "@/lib/classify";
 
 /**
  * New items go to the top of the queue. Positions are sparse floats, so this
@@ -84,6 +85,16 @@ export async function runExtraction(itemId: string, url: string): Promise<void> 
         extractedAt: new Date(),
       },
     });
+
+    await classifyItem(itemId, {
+      url: article.resolvedUrl,
+      title: article.title,
+      text: article.textContent,
+      byline: article.byline,
+      siteName: article.siteName,
+      wordCount: article.wordCount,
+      extracted: true,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[rightread] extraction failed for ${url}: ${message}`);
@@ -113,5 +124,50 @@ export async function runExtraction(itemId: string, url: string): Promise<void> 
         },
       })
       .catch(() => {});
+
+    // Still classify. A paywalled or JavaScript-rendered page has no text, but
+    // its URL and title are often decisive — and this is exactly the case the
+    // URL rules exist for.
+    const item = await prisma.item
+      .findUnique({ where: { id: itemId }, select: { title: true } })
+      .catch(() => null);
+    await classifyItem(itemId, {
+      url,
+      title: item?.title ?? url,
+      extracted: false,
+    });
+  }
+}
+
+/**
+ * Classifies an item and stores the result with its provenance.
+ *
+ * Never throws and never overwrites a user's manual override — the whole point
+ * of the override is that it sticks.
+ */
+async function classifyItem(itemId: string, evidence: PageEvidence): Promise<void> {
+  try {
+    const existing = await prisma.item.findUnique({
+      where: { id: itemId },
+      select: { kindSource: true },
+    });
+    if (existing?.kindSource === "user") return;
+
+    const result = await classifyPage(evidence);
+    await prisma.item.update({
+      where: { id: itemId },
+      data: {
+        kind: result.kind,
+        kindConfidence: result.confidence,
+        kindSource: result.source,
+        kindReason: result.reason,
+      },
+    });
+  } catch (err) {
+    // Classification is an enhancement; a failure must not affect the save.
+    console.warn(
+      `[rightread] classification failed for item ${itemId}:`,
+      err instanceof Error ? err.message : err
+    );
   }
 }

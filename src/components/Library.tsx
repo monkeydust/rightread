@@ -172,6 +172,7 @@ export function Library({ initialItems, status }: Props) {
                 busy={busyId === item.id}
                 onMove={(id, move) => void mutate(id, { move })}
                 onStar={(id, starred) => void mutate(id, { starred })}
+                onKind={(id, kind) => void mutate(id, { kind })}
                 onArchive={(id, archived) =>
                   void mutate(id, { status: archived ? "archived" : "unread" })
                 }

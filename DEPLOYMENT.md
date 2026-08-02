@@ -72,7 +72,12 @@ AUTH_TRUST_HOST=true
 AUTH_RESEND_KEY="<resend key>"
 EMAIL_FROM="rightread <onboarding@resend.dev>"
 DATABASE_URL="file:/app/data/production.db"
+OPENROUTER_API_KEY="<openrouter key>"
+OPENROUTER_MODEL="openai/gpt-5.6-luna"
 ```
+
+`OPENROUTER_*` drives page classification (and, later, summaries). If the key is
+absent the app still works — pages classify as `other` and nothing errors.
 
 `AUTH_URL` matters. With it set, `src/app/api/auth/[...nextauth]/route.ts`
 stops deriving the host from request headers. That derivation exists only to

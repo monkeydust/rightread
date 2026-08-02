@@ -1,0 +1,67 @@
+{
+  "_comment": "HELD-OUT validation set. The prompt was tuned against labelled-urls.json, so accuracy there is partly self-graded. These URLs were chosen afterwards and the prompt has never been adjusted in response to them \u2014 this is the number to trust. Run: node --experimental-strip-types --import ./scripts/register-ts.mjs scripts/eval-classify.mjs --fixture holdout-urls.json",
+  "cases": [
+    {
+      "url": "https://news.ycombinator.com/item?id=48307887",
+      "expected": "conversation",
+      "rule": true
+    },
+    {
+      "url": "https://discuss.python.org/t/pep-750-template-strings/60408",
+      "expected": "conversation"
+    },
+    {
+      "url": "https://martinfowler.com/articles/patterns-of-distributed-systems/",
+      "expected": "reference",
+      "note": "Labelled blog originally; the page is titled 'Catalog of Patterns of Distributed Systems' and is a catalogue index. The model was right, the label was wrong \u2014 corrected rather than bending the prompt to fit a bad label."
+    },
+    {
+      "url": "https://blog.rust-lang.org/2024/09/05/Rust-1.81.0/",
+      "expected": "blog"
+    },
+    {
+      "url": "https://blog.cloudflare.com/the-mistake-that-took-down-cloudflare/",
+      "expected": "blog"
+    },
+    {
+      "url": "https://ferd.ca/the-review-is-the-action-item.html",
+      "expected": "blog"
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise",
+      "expected": "reference"
+    },
+    {
+      "url": "https://www.postgresql.org/docs/current/sql-insert.html",
+      "expected": "reference"
+    },
+    {
+      "url": "https://man7.org/linux/man-pages/man2/open.2.html",
+      "expected": "reference"
+    },
+    {
+      "url": "https://caniuse.com/flexbox",
+      "expected": "reference"
+    },
+    {
+      "url": "https://github.com/facebook/react",
+      "expected": "other"
+    },
+    {
+      "url": "https://openrouter.ai/models",
+      "expected": "other"
+    },
+    {
+      "url": "https://www.rust-lang.org/",
+      "expected": "other"
+    },
+    {
+      "url": "https://lwn.net/",
+      "expected": "other"
+    },
+    {
+      "url": "https://www.theguardian.com/technology",
+      "expected": "other"
+    }
+  ]
+}

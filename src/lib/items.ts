@@ -14,6 +14,9 @@ const LIST_FIELDS = {
   extractError: true,
   status: true,
   starred: true,
+  kind: true,
+  kindConfidence: true,
+  kindSource: true,
   position: true,
   progress: true,
   savedAt: true,
@@ -32,6 +35,9 @@ export type ListItem = {
   extractError: string | null;
   status: string;
   starred: boolean;
+  kind: string;
+  kindConfidence: number;
+  kindSource: string;
   position: number;
   progress: number;
   savedAt: Date;

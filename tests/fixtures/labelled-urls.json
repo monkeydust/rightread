@@ -1,0 +1,130 @@
+{
+  "_comment": "Golden set for the page classifier. `expected` is the ground-truth kind. `rule` marks URLs a deterministic URL rule should catch \u2014 accuracy on those tests the rule table; everything else tests the model, which is the number that actually matters. Deliberately weighted toward non-rule URLs, and includes cases chosen to be hard: an outlet blog vs an outlet article, docs vs a tutorial about docs, a personal essay about a Reddit thread.",
+  "cases": [
+    {
+      "url": "https://news.ycombinator.com/item?id=44567857",
+      "expected": "conversation",
+      "rule": true
+    },
+    {
+      "url": "https://www.reddit.com/r/programming/comments/1cgshw4/",
+      "expected": "conversation",
+      "rule": true
+    },
+    {
+      "url": "https://lobste.rs/",
+      "expected": "other",
+      "rule": true
+    },
+    {
+      "url": "https://stackoverflow.com/questions/11227809/why-is-processing-a-sorted-array-faster-than-processing-an-unsorted-array",
+      "expected": "conversation",
+      "rule": true
+    },
+    {
+      "url": "https://github.com/nodejs/node/issues/49344",
+      "expected": "conversation",
+      "rule": true
+    },
+    {
+      "url": "https://news.ycombinator.com/",
+      "expected": "other",
+      "rule": true
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/Spaced_repetition",
+      "expected": "reference",
+      "rule": true
+    },
+    {
+      "url": "https://arxiv.org/abs/2309.04269",
+      "expected": "other",
+      "rule": true
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "expected": "other",
+      "rule": true
+    },
+    {
+      "url": "https://discuss.python.org/t/pep-703-making-the-global-interpreter-lock-optional/22606",
+      "expected": "conversation"
+    },
+    {
+      "url": "https://forum.golangbridge.org/",
+      "expected": "other"
+    },
+    {
+      "url": "https://www.bbc.co.uk/news/technology",
+      "expected": "other"
+    },
+    {
+      "url": "https://arstechnica.com/gadgets/2024/01/",
+      "expected": "other"
+    },
+    {
+      "url": "https://www.theguardian.com/technology/2026/aug/02/stock-market-turmoil-nvidia-china-light-ai-economy",
+      "expected": "article"
+    },
+    {
+      "url": "https://apnews.com/hub/technology",
+      "expected": "other"
+    },
+    {
+      "url": "https://simonwillison.net/2023/Aug/3/weird-world-of-llms/",
+      "expected": "blog"
+    },
+    {
+      "url": "https://blog.cloudflare.com/tag/deep-dive/",
+      "expected": "other"
+    },
+    {
+      "url": "https://danluu.com/deconstruct-files/",
+      "expected": "blog"
+    },
+    {
+      "url": "https://www.riscosopen.org/news/articles/2026/06/20/",
+      "expected": "blog"
+    },
+    {
+      "url": "https://jvns.ca/blog/2026/07/21/more-nice-django-things/",
+      "expected": "blog"
+    },
+    {
+      "url": "https://overreacted.io/a-complete-guide-to-useeffect/",
+      "expected": "blog"
+    },
+    {
+      "url": "https://astralcodexten.substack.com/p/your-book-review-the-educated-mind",
+      "expected": "blog"
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch",
+      "expected": "reference"
+    },
+    {
+      "url": "https://docs.python.org/3/library/asyncio-task.html",
+      "expected": "reference"
+    },
+    {
+      "url": "https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html",
+      "expected": "reference"
+    },
+    {
+      "url": "https://nodejs.org/api/fs.html",
+      "expected": "reference"
+    },
+    {
+      "url": "https://www.sqlite.org/lang_select.html",
+      "expected": "reference"
+    },
+    {
+      "url": "https://github.com/microsoft/TypeScript",
+      "expected": "other"
+    },
+    {
+      "url": "https://stripe.com/gb/pricing",
+      "expected": "other"
+    }
+  ]
+}
