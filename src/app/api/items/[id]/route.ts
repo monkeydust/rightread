@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { moveItem, setStarred } from "@/lib/reorder";
 import { isKind } from "@/lib/classify";
 import { runExtraction } from "@/lib/capture";
+import { publish } from "@/lib/events";
 
 /**
  * PATCH /api/items/[id] — the one mutation endpoint the list UI uses.
@@ -44,6 +45,7 @@ export async function PATCH(
         return Response.json({ error: "Invalid move" }, { status: 400 });
       }
       const moved = await moveItem(userId, id, body.move as "up");
+      if (moved) publish(userId, { type: "items-changed", cause: "updated", itemId: id });
       return Response.json({ ok: true, moved });
     }
 
@@ -62,11 +64,13 @@ export async function PATCH(
           kindReason: "set by you",
         },
       });
+      publish(userId, { type: "items-changed", cause: "updated", itemId: id });
       return Response.json({ ok: true });
     }
 
     if (typeof body.starred === "boolean") {
       await setStarred(userId, id, body.starred);
+      publish(userId, { type: "items-changed", cause: "updated", itemId: id });
       return Response.json({ ok: true });
     }
 
@@ -81,6 +85,7 @@ export async function PATCH(
           readAt: body.status === "archived" ? new Date() : null,
         },
       });
+      publish(userId, { type: "items-changed", cause: "updated", itemId: id });
       return Response.json({ ok: true });
     }
 
@@ -118,5 +123,6 @@ export async function DELETE(
   const { count } = await prisma.item.deleteMany({ where: { id, userId } });
   if (!count) return Response.json({ error: "Not found" }, { status: 404 });
 
+  publish(userId, { type: "items-changed", cause: "deleted", itemId: id });
   return Response.json({ ok: true });
 }

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { normalizeUrl, hostLabel } from "@/lib/url";
 import { extractArticle } from "@/lib/extract";
 import { classifyPage, type PageEvidence } from "@/lib/classify";
+import { publish } from "@/lib/events";
 
 /**
  * New items go to the top of the queue. Positions are sparse floats, so this
@@ -42,6 +43,7 @@ export async function captureUrl(userId: string, rawUrl: string) {
       },
     });
     // Retry extraction if it failed last time.
+    publish(userId, { type: "items-changed", cause: "captured", itemId: item.id });
     if (item.extractStatus !== "ok") void runExtraction(item.id, url);
     return { item, alreadySaved: true };
   }
@@ -56,6 +58,7 @@ export async function captureUrl(userId: string, rawUrl: string) {
     },
   });
 
+  publish(userId, { type: "items-changed", cause: "captured", itemId: item.id });
   void runExtraction(item.id, url);
   return { item, alreadySaved: false };
 }
@@ -66,6 +69,14 @@ export async function captureUrl(userId: string, rawUrl: string) {
  * retry button, which beats losing the save.
  */
 export async function runExtraction(itemId: string, url: string): Promise<void> {
+  // Needed to address the SSE channel; the caller only passes an item id.
+  const owner = await prisma.item
+    .findUnique({ where: { id: itemId }, select: { userId: true } })
+    .catch(() => null);
+  const notify = (cause: "extracted" | "classified") => {
+    if (owner?.userId) publish(owner.userId, { type: "items-changed", cause, itemId });
+  };
+
   try {
     const article = await extractArticle(url);
     await prisma.item.update({
@@ -86,6 +97,8 @@ export async function runExtraction(itemId: string, url: string): Promise<void> 
       },
     });
 
+    notify("extracted");
+
     await classifyItem(itemId, {
       url: article.resolvedUrl,
       title: article.title,
@@ -95,6 +108,7 @@ export async function runExtraction(itemId: string, url: string): Promise<void> 
       wordCount: article.wordCount,
       extracted: true,
     });
+    notify("classified");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[rightread] extraction failed for ${url}: ${message}`);
@@ -131,11 +145,14 @@ export async function runExtraction(itemId: string, url: string): Promise<void> 
     const item = await prisma.item
       .findUnique({ where: { id: itemId }, select: { title: true } })
       .catch(() => null);
+    notify("extracted");
+
     await classifyItem(itemId, {
       url,
       title: item?.title ?? url,
       extracted: false,
     });
+    notify("classified");
   }
 }
 

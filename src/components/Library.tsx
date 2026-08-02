@@ -27,16 +27,40 @@ export function Library({ initialItems, status }: Props) {
     setItems(data.items);
   }, [status]);
 
-  // Freshly captured items extract AND then classify in the background, so
-  // "settled" has to mean both. Polling on `extractStatus === "pending"` alone
-  // stopped the instant extraction finished — which is precisely when
-  // classification starts — so the kind only ever appeared on a manual refresh.
+  // ── Live updates ────────────────────────────────────────────────
+  // The server pushes when background work lands (extraction, then
+  // classification) and when another device edits something. The browser
+  // reconnects an EventSource on its own, so a dropped connection heals.
+  const [liveConnected, setLiveConnected] = useState(false);
+
+  useEffect(() => {
+    if (typeof EventSource === "undefined") return;
+
+    const source = new EventSource("/api/events");
+    source.onopen = () => setLiveConnected(true);
+    source.addEventListener("items-changed", () => void refresh());
+    source.onerror = () => {
+      // Fires on transient drops too, and EventSource retries by itself.
+      // Flipping this false re-arms the polling fallback for the gap.
+      setLiveConnected(false);
+    };
+
+    return () => {
+      setLiveConnected(false);
+      source.close();
+    };
+  }, [refresh]);
+
+  // Polling fallback, only while the stream is down. A proxy that buffers, a
+  // service worker that intercepts, or a browser without EventSource would
+  // otherwise leave the queue silently stale — so the old mechanism stays as
+  // the safety net rather than being deleted.
   const settling = items.some(
     (i) => i.extractStatus === "pending" || i.kindSource === "none"
   );
 
   useEffect(() => {
-    if (!settling) return;
+    if (liveConnected || !settling) return;
 
     // Bounded on purpose. A classification that never resolves — no API key,
     // an upstream outage — leaves kindSource "none" permanently, and an
@@ -50,7 +74,7 @@ export function Library({ initialItems, status }: Props) {
       void refresh();
     }, 2000);
     return () => clearInterval(id);
-  }, [settling, refresh]);
+  }, [liveConnected, settling, refresh]);
 
   const mutate = useCallback(
     async (id: string, body: Record<string, unknown>) => {
