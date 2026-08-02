@@ -14,12 +14,17 @@ Let's Encrypt automatically.
 
 ## Port map on this host
 
-| Port | App |
+| Port | What |
 | --- | --- |
+| 80 / 443 | Caddy |
 | 3000 | uk-property-analyzer — rightdata.uk |
-| 3001 | rightmind |
-| 3002 | previously used by a Caddy listener — avoid |
+| 3001 | Caddy listener fronting rightmind + scribe |
+| 3010 | rightmind container |
+| 3020 | rightscribe |
+| 4416 | pot-provider |
 | **3003** | **rightread** |
+
+Verify with `ss -tlnp` before assuming a port is free.
 
 ## Why HTTPS is mandatory here
 
@@ -126,7 +131,9 @@ remapped onto the server's user id; without that they would all be orphaned.
 ```bash
 # 1. Local: back up, then copy the database up
 npm run db:backup
-scp prisma/dev.db root@<SERVER_IP>:/opt/rightread/incoming.db
+node scripts/remote.mjs --put prisma/dev.db /opt/rightread/incoming.db
+# On Git Bash prefix with MSYS_NO_PATHCONV=1, or it rewrites the remote
+# absolute path into a Windows one before Node ever sees it.
 
 # 2. Server: back up the live database FIRST
 docker exec $(docker ps -q -f name=rightread) node scripts/db-backup.mjs

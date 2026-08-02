@@ -12,6 +12,10 @@
  *   docker exec <container> node scripts/db-backup.mjs
  */
 
+// In the container DATABASE_URL comes from the environment, but run locally via
+// `npm run db:backup` nothing has loaded .env — so the script would report "no
+// database given" while sitting next to the one it wants.
+import "dotenv/config";
 import { backup, DatabaseSync } from "node:sqlite";
 import { mkdirSync, existsSync, readdirSync, unlinkSync, statSync } from "node:fs";
 import { join, dirname, basename } from "node:path";

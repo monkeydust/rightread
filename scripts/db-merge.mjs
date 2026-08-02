@@ -23,6 +23,7 @@
  * the Prisma schema enforces.
  */
 
+import "dotenv/config";
 import { DatabaseSync } from "node:sqlite";
 import { existsSync } from "node:fs";
 import { argv, exit } from "node:process";

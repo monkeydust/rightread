@@ -60,9 +60,13 @@ function put(localPath, remotePath) {
     conn.sftp((err, sftp) => {
       if (err) return reject(err);
       const data = readFileSync(localPath);
+      // fastPut/createWriteStream can fail opaquely if the remote directory
+      // doesn't exist; surface the actual path in the error.
       const ws = sftp.createWriteStream(remotePath);
       ws.on("close", () => resolve());
-      ws.on("error", reject);
+      ws.on("error", (e) =>
+        reject(new Error(`${e.message} (writing to ${remotePath})`))
+      );
       ws.end(data);
     });
   });
