@@ -27,14 +27,30 @@ export function Library({ initialItems, status }: Props) {
     setItems(data.items);
   }, [status]);
 
-  // Freshly captured items extract in the background — poll until they settle.
-  const pending = items.some((i) => i.extractStatus === "pending");
+  // Freshly captured items extract AND then classify in the background, so
+  // "settled" has to mean both. Polling on `extractStatus === "pending"` alone
+  // stopped the instant extraction finished — which is precisely when
+  // classification starts — so the kind only ever appeared on a manual refresh.
+  const settling = items.some(
+    (i) => i.extractStatus === "pending" || i.kindSource === "none"
+  );
 
   useEffect(() => {
-    if (!pending) return;
-    const id = setInterval(() => void refresh(), 2000);
+    if (!settling) return;
+
+    // Bounded on purpose. A classification that never resolves — no API key,
+    // an upstream outage — leaves kindSource "none" permanently, and an
+    // unbounded interval would then poll for the entire life of the tab.
+    const deadline = Date.now() + 90_000;
+    const id = setInterval(() => {
+      if (Date.now() > deadline) {
+        clearInterval(id);
+        return;
+      }
+      void refresh();
+    }, 2000);
     return () => clearInterval(id);
-  }, [pending, refresh]);
+  }, [settling, refresh]);
 
   const mutate = useCallback(
     async (id: string, body: Record<string, unknown>) => {

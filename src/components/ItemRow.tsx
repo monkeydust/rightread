@@ -85,6 +85,9 @@ export function ItemRow({
 
   const minutes = Math.max(1, Math.round((item.wordCount ?? 0) / 200));
   const extracting = item.extractStatus === "pending";
+  // Classification runs once extraction succeeds; until it lands the chip
+  // shows a placeholder rather than asserting a confident "other".
+  const classifying = !extracting && item.kindSource === "none";
   const failed = item.extractStatus === "failed";
   const archived = item.status === "archived";
 
@@ -158,7 +161,9 @@ export function ItemRow({
                         : ""
                     }`
               }
-              className="cursor-pointer appearance-none rounded border bg-transparent py-0 pl-1.5 pr-1.5 text-[11px] leading-[1.4] outline-none"
+              className={`cursor-pointer appearance-none rounded border bg-transparent py-0 pl-1.5 pr-1.5 text-[11px] leading-[1.4] outline-none ${
+                classifying ? "animate-pulse" : ""
+              }`}
               style={{
                 borderColor:
                   item.kindSource === "user" ? "var(--accent)" : "var(--border)",
@@ -166,7 +171,7 @@ export function ItemRow({
                   item.kindSource === "user" ? "var(--accent)" : "var(--text-muted)",
                 // A low-confidence guess should look like one.
                 opacity:
-                  item.kindSource === "none" ||
+                  classifying ||
                   (item.kindSource === "llm" && item.kindConfidence < 0.5)
                     ? 0.55
                     : 1,
