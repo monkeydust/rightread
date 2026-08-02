@@ -21,6 +21,12 @@ services:
       - AUTH_TRUST_HOST=true
       - AUTH_RESEND_KEY=${AUTH_RESEND_KEY}
       - EMAIL_FROM=${EMAIL_FROM}
+      # Must be listed here, not merely present in .env.prod: --env-file makes
+      # a variable available for ${...} substitution in this file, it does NOT
+      # pass it into the container. Anything the app reads at runtime needs an
+      # explicit entry below.
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL}
     volumes:
       - sqlite_data:/app/data
 
