@@ -1,0 +1,24 @@
+# rightread — append these blocks to /etc/caddy/Caddyfile on the Hetzner box,
+# keeping the existing rightdata.uk block that serves uk-property-analyzer.
+#
+# Caddy requests the Let's Encrypt certificate on the first request to each
+# hostname, so BOTH must already resolve to this server or issuance fails.
+#
+# HTTPS is a hard requirement, not hardening: Chrome gates the share target,
+# WebAPK install and service worker on a secure origin, and fails silently
+# without one — which is why "Add to Home screen" over http:// only ever
+# produced a bookmark shortcut with no share-sheet entry.
+#
+# Caddy sets X-Forwarded-Proto and X-Forwarded-Host automatically; rightread
+# uses both to build sign-in links and to decide cookie security.
+
+www.rightread.net {
+    reverse_proxy localhost:3003
+}
+
+# One canonical hostname. AUTH_URL is pinned to the www form, and sessions are
+# per-origin — serving both would mean signing in twice and a share target
+# registered against whichever you happened to install from.
+rightread.net {
+    redir https://www.rightread.net{uri} permanent
+}

@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "rightread",
+  "version": "0.1.0",
+  "description": "Save the current page to rightread.",
+  "permissions": ["activeTab", "contextMenus", "storage", "notifications"],
+  "host_permissions": ["http://localhost/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Save to rightread",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "128": "icons/icon-128.png"
+  },
+  "commands": {
+    "save-page": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S"
+      },
+      "description": "Save the current page to rightread"
+    }
+  }
+}

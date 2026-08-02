@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>rightread — options</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fff;
+        --text: #1a1a18;
+        --muted: #6b6a65;
+        --border: #e6e4df;
+        --accent: #1a1a18;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14141a;
+          --text: #e8e8ea;
+          --muted: #9a9aa4;
+          --border: #2c2c36;
+          --accent: #e8e8ea;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 40px 24px;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main { max-width: 440px; margin: 0 auto; }
+      h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+      p.sub { color: var(--muted); margin: 0 0 28px; font-size: 13px; }
+      label { display: block; font-weight: 500; margin-bottom: 6px; }
+      .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+      input {
+        width: 100%;
+        padding: 9px 11px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+      }
+      input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .field { margin-bottom: 20px; }
+      button {
+        padding: 9px 18px;
+        border: 0;
+        border-radius: 8px;
+        background: var(--accent);
+        color: var(--bg);
+        font: 500 14px inherit;
+        cursor: pointer;
+      }
+      #status { margin-left: 12px; font-size: 13px; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>rightread</h1>
+      <p class="sub">Point the extension at your rightread server.</p>
+
+      <div class="field">
+        <label for="serverUrl">Server address</label>
+        <input id="serverUrl" type="url" placeholder="http://localhost:3002" />
+        <p class="hint">Where rightread is running. No trailing slash needed.</p>
+      </div>
+
+      <div class="field">
+        <label for="token">Capture token</label>
+        <input id="token" type="password" placeholder="rr_…" />
+        <p class="hint">Create one in rightread → Settings → Capture tokens.</p>
+      </div>
+
+      <button id="save">Save</button>
+      <span id="status" role="status"></span>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

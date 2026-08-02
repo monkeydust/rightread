@@ -1,0 +1,347 @@
+@import "tailwindcss";
+
+/*
+ * Two surfaces, deliberately different:
+ *  - the library (app chrome: compact, dense, UI font)
+ *  - the reader (paper: wide margins, serif, generous line height)
+ */
+/*
+ * Palette follows Claude: warm cream paper, warm near-black ink, clay accent.
+ * Everything is warm-tinted — no neutral greys — which is what stops long
+ * reading sessions feeling clinical.
+ *
+ * Typefaces are the closest freely-licensed stand-ins for Claude's own
+ * (Tiempos Text / Styrene, both commercial). See src/app/fonts.ts.
+ */
+@theme {
+  --font-sans: var(--font-reader-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+  --font-serif: var(--font-reader-serif), Charter, Georgia, "Iowan Old Style",
+    ui-serif, serif;
+}
+
+:root {
+  --bg: #faf9f5; /* Claude cream */
+  --bg-subtle: #f0eee6;
+  --border: #e3ded1;
+  --text: #1f1e1d; /* warm near-black */
+  --text-muted: #6c6a65;
+  --accent: #d97757; /* clay / coral */
+  --accent-ink: #ffffff; /* text on top of accent */
+  --paper: #faf9f5;
+  --paper-text: #1f1e1d;
+}
+
+/* Warmer still, for bright rooms. */
+:root[data-theme="sepia"] {
+  --paper: #f2e9d8;
+  --paper-text: #3a3128;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1f1e1d;
+    --bg-subtle: #262624;
+    --border: #3a3936;
+    --text: #f0eee6;
+    --text-muted: #a3a098;
+    --accent: #d97757;
+    --accent-ink: #1f1e1d;
+    --paper: #1f1e1d;
+    --paper-text: #e8e5dc;
+  }
+}
+
+:root[data-theme="light"] {
+  --bg: #faf9f5;
+  --bg-subtle: #f0eee6;
+  --border: #e3ded1;
+  --text: #1f1e1d;
+  --text-muted: #6c6a65;
+  --accent: #d97757;
+  --accent-ink: #ffffff;
+  --paper: #faf9f5;
+  --paper-text: #1f1e1d;
+}
+
+:root[data-theme="dark"] {
+  --bg: #1f1e1d;
+  --bg-subtle: #262624;
+  --border: #3a3936;
+  --text: #f0eee6;
+  --text-muted: #a3a098;
+  --accent: #d97757;
+  --accent-ink: #1f1e1d;
+  --paper: #1f1e1d;
+  --paper-text: #e8e5dc;
+}
+
+html {
+  background: var(--bg);
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  /* Stops iOS/Android from bumping text size in landscape. */
+  text-size-adjust: 100%;
+}
+
+/* Kill the tap-highlight flash on the list's many small controls. */
+@media (hover: none) {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Reader typography ──────────────────────────────────────
+   Applied to extracted article HTML. Sizing is driven by
+   --reader-scale so the font-size control is one CSS variable. */
+
+.prose-reader {
+  font-family: var(--font-serif);
+  /* Source Serif has a tall x-height, so it reads a size larger than its
+     nominal value — 1.15rem here sits where 1.25rem would in Georgia. */
+  font-size: calc(1.15rem * var(--reader-scale, 1));
+  line-height: 1.75;
+  color: var(--paper-text);
+  overflow-wrap: break-word;
+  font-optical-sizing: auto;
+  /* Ligatures and proper old-style punctuation; kerning matters at this size. */
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
+}
+
+/* Vertical rhythm is set by each element's own margins rather than a
+   `* + *` rule plus negative margins to claw back the heading case — that
+   fought itself and broke whenever an element wasn't a direct child. */
+.prose-reader > * {
+  margin-block: 0;
+}
+
+.prose-reader p,
+.prose-reader ul,
+.prose-reader ol,
+.prose-reader pre,
+.prose-reader blockquote,
+.prose-reader table {
+  margin-block: 1.15em;
+}
+
+.prose-reader h1,
+.prose-reader h2,
+.prose-reader h3,
+.prose-reader h4 {
+  font-family: var(--font-sans);
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  /* Space above a heading, little below: it should bind to the text it
+     introduces, not float midway between two sections. */
+  margin-block: 2.1em 0.55em;
+  /* Stops a heading dropping one word onto its own line. */
+  text-wrap: balance;
+}
+
+/* No dead space when a heading opens the article. */
+.prose-reader > :first-child {
+  margin-block-start: 0;
+}
+
+.prose-reader h1 { font-size: 1.55em; }
+.prose-reader h2 { font-size: 1.3em; }
+.prose-reader h3 { font-size: 1.12em; }
+.prose-reader h4 {
+  font-size: 1em;
+  letter-spacing: 0;
+}
+
+/* Avoids the ragged single-word last line. Browsers without it lose nothing. */
+.prose-reader p,
+.prose-reader li {
+  text-wrap: pretty;
+}
+
+/* Hyphenation only where the measure is genuinely tight — on a phone a long
+   URL or compound word otherwise forces a horizontal scroll. */
+@media (max-width: 30rem) {
+  .prose-reader p,
+  .prose-reader li {
+    hyphens: auto;
+  }
+}
+
+.prose-reader a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--paper-text) 30%, transparent);
+  text-decoration-thickness: 0.06em;
+  text-underline-offset: 0.16em;
+  /* Descenders shouldn't be sliced by the rule. */
+  text-decoration-skip-ink: auto;
+  transition: text-decoration-color 120ms ease;
+}
+
+.prose-reader a:hover {
+  text-decoration-color: var(--accent);
+}
+
+/* Reference markers — the [1][2] after a sentence on wiki-style pages. Left
+   at body size they punch holes in the paragraph; muted and small they read
+   as apparatus rather than content. */
+.prose-reader sup {
+  font-size: 0.68em;
+  line-height: 0;
+  vertical-align: super;
+}
+
+.prose-reader sup a {
+  text-decoration: none;
+  color: color-mix(in srgb, var(--paper-text) 45%, transparent);
+  padding-inline: 0.08em;
+}
+
+.prose-reader sup a:hover {
+  color: var(--accent);
+}
+
+/* Dragging over text should feel like the rest of the app. */
+.prose-reader ::selection {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.prose-reader img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin-inline: auto;
+  border-radius: 4px;
+  /* Most article images are photos on a light ground; a hairline stops them
+     bleeding into cream paper without framing them like a border. */
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--paper-text) 8%, transparent);
+}
+
+.prose-reader p > img,
+.prose-reader > img {
+  margin-block: 2em;
+}
+
+.prose-reader figure {
+  margin-block: 2.2em;
+}
+
+/* On a wide viewport let figures run a little past the measure — the text
+   column stays at a readable width while images get room to be legible.
+   Clamped so it can never exceed the viewport on a phone. */
+@media (min-width: 60rem) {
+  .prose-reader figure {
+    width: min(120%, calc(100vw - 4rem));
+    margin-inline: calc((100% - min(120%, calc(100vw - 4rem))) / 2);
+  }
+}
+
+.prose-reader figcaption {
+  font-family: var(--font-sans);
+  font-size: 0.78em;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--paper-text) 58%, transparent);
+  text-align: center;
+  margin-top: 0.8em;
+  text-wrap: pretty;
+}
+
+/* The one place the clay accent appears in body text — a pull quote reads as
+   deliberate, whereas colouring every inline link would be noise on a page
+   with hundreds of them. */
+.prose-reader blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 1.2em;
+  font-style: italic;
+  color: color-mix(in srgb, var(--paper-text) 85%, transparent);
+}
+
+.prose-reader pre {
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
+  font-size: 0.82em;
+  line-height: 1.6;
+  background: color-mix(in srgb, var(--paper-text) 6%, transparent);
+  padding: 1em 1.15em;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.prose-reader code {
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
+  font-size: 0.85em;
+  background: color-mix(in srgb, var(--paper-text) 7%, transparent);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+}
+
+.prose-reader pre code {
+  background: none;
+  padding: 0;
+  font-size: 1em;
+}
+
+.prose-reader ul,
+.prose-reader ol {
+  padding-left: 1.5em;
+}
+
+.prose-reader ul { list-style: disc; }
+.prose-reader ol { list-style: decimal; }
+.prose-reader li + li { margin-top: 0.5em; }
+
+.prose-reader hr {
+  border: none;
+  border-top: 1px solid color-mix(in srgb, var(--paper-text) 15%, transparent);
+  margin: 2.5em 0;
+}
+
+/* Tables in articles are usually wide — let them scroll rather than
+   forcing the page body to scroll horizontally. */
+.prose-reader table {
+  display: block;
+  overflow-x: auto;
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-sans);
+  font-size: 0.85em;
+}
+
+/* Horizontal rules only. A full border grid reads as a spreadsheet dropped
+   into an essay; rules keep the data legible and the page calm. */
+.prose-reader th,
+.prose-reader td {
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--paper-text) 12%, transparent);
+  padding: 0.55em 0.9em 0.55em 0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.prose-reader thead th {
+  border-bottom-color: color-mix(in srgb, var(--paper-text) 35%, transparent);
+  font-weight: 600;
+  font-size: 0.92em;
+  letter-spacing: 0.01em;
+}
+
+.prose-reader tr:last-child td {
+  border-bottom: 0;
+}
+
+@media print {
+  .no-print { display: none !important; }
+  .prose-reader { font-size: 11pt; }
+}

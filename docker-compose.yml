@@ -1,0 +1,22 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      # Host ports already taken on the Hetzner box: 3000 uk-property-analyzer
+      # (rightdata.uk), 3001 rightmind, 3002 previously used by a Caddy
+      # listener. Caddy proxies read.rightdata.uk to this one.
+      - "3003:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:/app/data/production.db
+      - AUTH_SECRET=${AUTH_SECRET}
+      - AUTH_URL=${AUTH_URL}
+      - AUTH_TRUST_HOST=true
+      - AUTH_RESEND_KEY=${AUTH_RESEND_KEY}
+      - EMAIL_FROM=${EMAIL_FROM}
+    volumes:
+      - sqlite_data:/app/data
+
+volumes:
+  sqlite_data:
