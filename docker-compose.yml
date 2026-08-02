@@ -1,3 +1,9 @@
+# `version` is obsolete in Compose v2 but REQUIRED here: the server has
+# docker-compose v1.29.2, which without it falls back to the legacy v1
+# file format where top-level keys are service names — so `services:`
+# would be read as a service called "services" and the file fails.
+version: '3.8'
+
 services:
   app:
     build: .
