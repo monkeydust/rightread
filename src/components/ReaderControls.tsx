@@ -27,6 +27,7 @@ export function ReaderControls({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement>(null);
 
   useReadingProgress(itemId, initialProgress);
 
@@ -44,6 +45,7 @@ export function ReaderControls({
     <div className="no-print flex items-center gap-1">
       <div className="relative">
         <button
+          ref={toggleRef}
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
@@ -56,7 +58,9 @@ export function ReaderControls({
 
         {/* Mounted only on open, which is always after hydration — so the
             panel can read localStorage directly without an SSR mismatch. */}
-        {open && <DisplayPanel onClose={() => setOpen(false)} />}
+        {open && (
+          <DisplayPanel onClose={() => setOpen(false)} toggleRef={toggleRef} />
+        )}
       </div>
 
       <button
@@ -76,21 +80,31 @@ function readIndex(key: string, max: number, fallback: number): number {
   return Number.isInteger(raw) && raw >= 0 && raw < max ? raw : fallback;
 }
 
-function DisplayPanel({ onClose }: { onClose: () => void }) {
+function DisplayPanel({
+  onClose,
+  toggleRef,
+}: {
+  onClose: () => void;
+  toggleRef: React.RefObject<HTMLButtonElement | null>;
+}) {
+  const panelRef = useRef<HTMLDivElement>(null);
   // Lazy initialisers: this component never renders on the server.
   const [scaleIndex, setScaleIndex] = useState(() =>
-    readIndex("rr:scale", SCALES.length, 2)
+    readIndex("rr:scale", SCALES.length, 2),
   );
   const [widthIndex, setWidthIndex] = useState(() =>
-    readIndex("rr:width", WIDTHS.length, 0)
+    readIndex("rr:width", WIDTHS.length, 0),
   );
   const [theme, setTheme] = useState<Theme | "">(
-    () => (localStorage.getItem("rr:theme") as Theme) ?? ""
+    () => (localStorage.getItem("rr:theme") as Theme) ?? "",
   );
 
   function applyScale(index: number) {
     setScaleIndex(index);
-    document.documentElement.style.setProperty("--reader-scale", String(SCALES[index]));
+    document.documentElement.style.setProperty(
+      "--reader-scale",
+      String(SCALES[index]),
+    );
     localStorage.setItem("rr:scale", String(index));
   }
 
@@ -106,55 +120,84 @@ function DisplayPanel({ onClose }: { onClose: () => void }) {
     localStorage.setItem("rr:theme", next);
   }
 
+  // Close on any click outside the panel, and on Escape.
+  //
+  // This replaced a `fixed inset-0` click-away overlay, which silently did not
+  // work: the reader header uses `backdrop-blur`, and backdrop-filter creates a
+  // containing block for fixed-position descendants — so the overlay only
+  // covered the header strip, and clicks in the article never reached it. A
+  // document-level listener has no such dependency on ancestor styles.
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      // The toggle button handles its own close; ignoring it here stops the
+      // two firing together and re-opening the panel immediately.
+      if (panelRef.current?.contains(target)) return;
+      if (toggleRef.current?.contains(target)) return;
+      onClose();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose, toggleRef]);
+
   return (
-    <>
-      {/* Click-away layer — simpler than a focus trap for a three-row menu. */}
-      <div className="fixed inset-0 z-20" onClick={onClose} aria-hidden />
-      <div
-        className="absolute right-0 z-30 mt-1 w-60 rounded-xl border p-3 shadow-lg"
-        style={{ borderColor: "var(--border)", background: "var(--bg)" }}
-      >
-        <Row label="Text size">
-          <Stepper
-            onDown={() => applyScale(Math.max(0, scaleIndex - 1))}
-            onUp={() => applyScale(Math.min(SCALES.length - 1, scaleIndex + 1))}
-            downDisabled={scaleIndex === 0}
-            upDisabled={scaleIndex === SCALES.length - 1}
-          />
-        </Row>
+    <div
+      ref={panelRef}
+      className="absolute right-0 z-30 mt-1 w-60 rounded-xl border p-3 shadow-lg"
+      style={{ borderColor: "var(--border)", background: "var(--bg)" }}
+    >
+      <Row label="Text size">
+        <Stepper
+          onDown={() => applyScale(Math.max(0, scaleIndex - 1))}
+          onUp={() => applyScale(Math.min(SCALES.length - 1, scaleIndex + 1))}
+          downDisabled={scaleIndex === 0}
+          upDisabled={scaleIndex === SCALES.length - 1}
+        />
+      </Row>
 
-        <Row label="Width">
-          <Stepper
-            onDown={() => applyWidth(Math.max(0, widthIndex - 1))}
-            onUp={() => applyWidth(Math.min(WIDTHS.length - 1, widthIndex + 1))}
-            downDisabled={widthIndex === 0}
-            upDisabled={widthIndex === WIDTHS.length - 1}
-          />
-        </Row>
+      <Row label="Width">
+        <Stepper
+          onDown={() => applyWidth(Math.max(0, widthIndex - 1))}
+          onUp={() => applyWidth(Math.min(WIDTHS.length - 1, widthIndex + 1))}
+          downDisabled={widthIndex === 0}
+          upDisabled={widthIndex === WIDTHS.length - 1}
+        />
+      </Row>
 
-        <Row label="Theme">
-          <div className="flex gap-1">
-            {(["light", "sepia", "dark"] as Theme[]).map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => applyTheme(t)}
-                aria-label={t}
-                aria-pressed={theme === t}
-                className="h-7 w-7 rounded-full border-2"
-                /* Swatches are literal so each shows its own theme, not the
+      <Row label="Theme">
+        <div className="flex gap-1">
+          {(["light", "sepia", "dark"] as Theme[]).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => applyTheme(t)}
+              aria-label={t}
+              aria-pressed={theme === t}
+              className="h-7 w-7 rounded-full border-2"
+              /* Swatches are literal so each shows its own theme, not the
                    active one — keep in sync with globals.css. */
-                style={{
-                  background:
-                    t === "light" ? "#faf9f5" : t === "sepia" ? "#f2e9d8" : "#1f1e1d",
-                  borderColor: theme === t ? "var(--accent)" : "var(--border)",
-                }}
-              />
-            ))}
-          </div>
-        </Row>
-      </div>
-    </>
+              style={{
+                background:
+                  t === "light"
+                    ? "#faf9f5"
+                    : t === "sepia"
+                      ? "#f2e9d8"
+                      : "#000000",
+                borderColor: theme === t ? "var(--accent)" : "var(--border)",
+              }}
+            />
+          ))}
+        </div>
+      </Row>
+    </div>
   );
 }
 
@@ -171,7 +214,10 @@ function useReadingProgress(itemId: string, initialProgress: number) {
     if (initialProgress > 0.02 && initialProgress < 0.98) {
       const scrollable =
         document.documentElement.scrollHeight - window.innerHeight;
-      window.scrollTo({ top: scrollable * initialProgress, behavior: "instant" });
+      window.scrollTo({
+        top: scrollable * initialProgress,
+        behavior: "instant",
+      });
     }
   }, [initialProgress]);
 
@@ -185,7 +231,7 @@ function useReadingProgress(itemId: string, initialProgress: number) {
         `/api/items/${itemId}/progress`,
         new Blob([JSON.stringify({ progress: latest })], {
           type: "application/json",
-        })
+        }),
       );
     };
 
@@ -211,7 +257,13 @@ function useReadingProgress(itemId: string, initialProgress: number) {
   }, [itemId, initialProgress]);
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex items-center justify-between py-1.5">
       <span className="text-[13px]" style={{ color: "var(--text-muted)" }}>
