@@ -57,6 +57,47 @@ export function normalizeUrl(input: string): string {
   return out;
 }
 
+/**
+ * Pulls the first usable link out of arbitrary text and normalises it.
+ *
+ * Shared by the share target and the paste box, which face the same problem:
+ * what arrives is often not a bare URL. Android apps hand over "Great read
+ * https://example.com/x" as one string, and copying from a page picks up
+ * surrounding whitespace or a trailing bracket.
+ *
+ * Returns null rather than throwing — both callers treat "no link here" as an
+ * ordinary outcome, not an error.
+ */
+export function extractFirstUrl(text: string): string | null {
+  const trimmed = text?.trim();
+  if (!trimmed) return null;
+
+  // An explicit scheme wins, and the scan must come first even when the text
+  // has no spaces: "(https://a.com/x)" is a single token, so treating it as a
+  // bare hostname would prepend a scheme to the bracket and mangle it.
+  const match = trimmed.match(/https?:\/\/[^\s<>"']+/i);
+  if (match) {
+    // Trailing punctuation is almost always the sentence, not the URL.
+    const candidate = match[0].replace(/[.,;:!?)\]}>'"]+$/, "");
+    try {
+      return normalizeUrl(candidate);
+    } catch {
+      return null;
+    }
+  }
+
+  // No scheme anywhere. Accept a bare hostname only when the whole thing is one
+  // token — "example.com/article" is a link, a sentence mentioning a domain is
+  // not — after shedding any wrapping punctuation.
+  const bare = trimmed.replace(/^[([{<'"]+/, "").replace(/[.,;:!?)\]}>'"]+$/, "");
+  if (!bare || /\s/.test(bare)) return null;
+  try {
+    return normalizeUrl(bare);
+  } catch {
+    return null;
+  }
+}
+
 /** "theverge.com" — for the source label in the list. */
 export function hostLabel(url: string): string {
   try {

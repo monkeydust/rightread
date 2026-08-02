@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { captureUrl } from "@/lib/capture";
+import { extractFirstUrl } from "@/lib/url";
 
 export const dynamic = "force-dynamic";
 
@@ -14,14 +15,12 @@ export const dynamic = "force-dynamic";
  * token out of `text`.
  */
 function pickUrl(params: Record<string, string | undefined>): string | null {
-  const direct = params.url?.trim();
-  if (direct) return direct;
-
-  const text = params.text?.trim();
-  if (!text) return null;
-
-  const match = text.match(/https?:\/\/[^\s<>"']+/i);
-  return match ? match[0] : null;
+  // `url` first when the sharing app populated it properly, then fall back to
+  // digging a link out of `text`. Both go through the same extractor the paste
+  // box uses, so a share and a paste of the same string behave identically.
+  return (
+    extractFirstUrl(params.url ?? "") ?? extractFirstUrl(params.text ?? "")
+  );
 }
 
 export default async function SharePage(props: PageProps<"/share">) {
