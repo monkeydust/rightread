@@ -31,6 +31,10 @@ adjustable size and width, light/sepia/dark, and it remembers where you stopped.
 **Prioritise.** One ordered queue with move up/down, a star for things that
 matter, and an archive for things you've finished.
 
+**Search two ways.** Keyword search over the full text, and semantic search
+that finds pages about what you asked even when they never use your words.
+Results stay in separate labelled groups — see [Search](#search).
+
 ## Stack
 
 Next.js 16 · React 19 · Prisma + SQLite · Auth.js (magic link via Resend) ·
@@ -59,6 +63,15 @@ the server console** — copy it from there.
 | `EMAIL_FROM` | Sender address for those emails. |
 | `OPENROUTER_API_KEY` | OpenRouter key. Without it classification degrades to `other`; nothing breaks. |
 | `OPENROUTER_MODEL` | Defaults to `openai/gpt-5.6-luna`. One model for all of rightread. |
+| `OPENROUTER_EMBED_MODEL` | Defaults to `openai/text-embedding-3-small`. Changing it invalidates stored vectors — re-run `search:backfill --force`. |
+| `OPENROUTER_SEMANTIC_FLOOR` | Similarity cut-off, 0–1. Defaults to `0.22` (measured — see [Search](#search)). |
+
+> Any variable the app reads at runtime needs an explicit entry under
+> `environment:` in `docker-compose.yml`. `--env-file` only makes it available
+> for `${...}` substitution *in that file* — it does **not** pass it into the
+> container. Give each one a `:-` default there too: a variable listed without
+> one, and absent from the env file, arrives as an **empty string** rather than
+> unset, which `??` does not catch.
 
 ### Signing in from your phone on a LAN
 
@@ -129,6 +142,59 @@ The eval runs the *real* pipeline — same fetch, extraction and sanitising as
 production — because feeding the classifier hand-cleaned text would measure
 something easier than what ships.
 
+## Search
+
+Two searches run on every query and their results are shown as **separate,
+labelled groups** — never merged into one ranking. A keyword hit is a fact (the
+words are on the page); a semantic hit is a guess. Blending them into a single
+order hides which is which.
+
+**Exact matches** — SQLite FTS5 over title, excerpt, body and URL.
+
+| You type | You get |
+|---|---|
+| `rust async` | pages containing both words |
+| `"memory safety"` | that exact phrase |
+| `data*` | data, database, dataset |
+| `"web assem"*` | prefix search on a phrase |
+
+Ranked with bm25, weighted so a term in the title outranks the same term buried
+in the body, and returned with a snippet around the match. Everything else —
+parens, `AND`, `NOT`, `NEAR`, hyphens, stray quotes — is treated as literal
+text, so a search can match nothing but can never raise a syntax error.
+
+The index is maintained by **SQLite triggers**, not by application code.
+App-level sync is only as complete as the set of write paths you remembered;
+one stray `updateMany` and the index rots silently, which is the worst failure
+a search index has.
+
+**Related by meaning** — a 1536-dimension embedding per item (~6KB), stored as
+a float32 BLOB, compared by cosine similarity. Anything already found by
+keyword is excluded, so the second group is genuinely additional.
+
+Brute-force comparison across every vector is deliberate: a thousand items is
+low single-digit milliseconds, against adding a vector extension and a build
+dependency to the image. Revisit around 50k items, not before.
+
+The similarity floor was **measured, not guessed** (an initial guess of 0.34
+sat *above* most real matches, so semantic search silently returned nothing):
+
+| Query type | Similarity |
+|---|---|
+| irrelevant ("cooking pasta recipes") | 0.151 ceiling |
+| conceptual ("data races" → Rust ownership) | 0.291 |
+| direct ("ownership" → Rust ownership) | 0.345 |
+| strong ("react hooks" → useEffect guide) | 0.542 |
+
+0.22 clears the noise ceiling with headroom. It is specific to the embedding
+model — change the model and re-measure. `OPENROUTER_SEMANTIC_FLOOR` overrides
+it; out-of-range values are refused with a warning rather than silently
+accepted, because a floor of 0 means "return the entire library".
+
+Existing items are indexed with `npm run search:backfill`. Startup rebuilds the
+keyword index automatically — it has to be dropped before `prisma db push`,
+which would otherwise refuse to run rather than drop objects it does not own.
+
 ## How it works
 
 | Area | Where |
@@ -188,11 +254,12 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for the full procedure.
 ```bash
 npm run dev          # dev server
 npm run build        # production build
-npm test             # sanitize, url, tidy and db-merge suites
+npm test             # sanitize, url, tidy, classify, search, env and db-merge suites
 npm run lint
 npm run db:backup    # timestamped, keeps the last 20
 npm run db:merge     # additive merge between two databases
 npm run icons        # regenerate app icons from scripts/make-icons.py
+npm run search:backfill        # index existing items (--index-only skips embedding)
 ```
 
 ## Licence
