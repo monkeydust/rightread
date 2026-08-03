@@ -14,11 +14,59 @@
 
 const EMBED_URL = "https://openrouter.ai/api/v1/embeddings";
 
+// Trimmed and emptiness-checked, not just `?? default`. Docker Compose sets an
+// undeclared variable to the empty string rather than leaving it unset, so a
+// bare `??` would hand an empty model name to the API and fail every search.
 export const EMBED_MODEL =
-  process.env.OPENROUTER_EMBED_MODEL ?? "openai/text-embedding-3-small";
+  process.env.OPENROUTER_EMBED_MODEL?.trim() || "openai/text-embedding-3-small";
 
 /** Cheap relative to an article; well short of the model's 8k limit. */
 const MAX_CHARS = 8_000;
+
+/**
+ * Cosine similarity below which a semantic hit is noise.
+ *
+ * Measured on text-embedding-3-small over a real library rather than guessed —
+ * an earlier value of 0.34 was set by assumption and sat *above* most genuine
+ * matches, so semantic search silently returned nothing:
+ *
+ *   deliberately irrelevant query ("cooking pasta recipes")   ceiling 0.151
+ *   conceptual match ("data races" -> Rust ownership)                0.291
+ *   direct match ("ownership" -> Rust ownership)                     0.345
+ *   strong match ("react hooks" -> useEffect guide)                  0.542
+ *
+ * 0.22 clears the noise ceiling with headroom while admitting conceptual
+ * matches. It is specific to this embedding model — changing the model means
+ * re-measuring, which is what OPENROUTER_SEMANTIC_FLOOR is for.
+ */
+export const DEFAULT_SEMANTIC_FLOOR = 0.22;
+
+/**
+ * Reads the floor from the environment, defensively.
+ *
+ * Not `Number(env ?? default)`. Docker Compose turns a variable listed under
+ * `environment:` but absent from the env file into the *empty string* rather
+ * than leaving it unset, and `Number("")` is 0, not NaN. A bare `??` would
+ * therefore drop the floor to zero in exactly one environment — production —
+ * and every item in the library would come back as "related by meaning" with
+ * nothing in any log to explain it. An out-of-range value is refused loudly
+ * for the same reason: a threshold that silently means "match everything" is
+ * worse than one that is obviously wrong.
+ */
+export function readFloor(): number {
+  const raw = process.env.OPENROUTER_SEMANTIC_FLOOR?.trim();
+  if (!raw) return DEFAULT_SEMANTIC_FLOOR;
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    console.warn(
+      `[search] ignoring OPENROUTER_SEMANTIC_FLOOR=${JSON.stringify(raw)} ` +
+        `(want a number 0-1); using ${DEFAULT_SEMANTIC_FLOOR}`
+    );
+    return DEFAULT_SEMANTIC_FLOOR;
+  }
+  return parsed;
+}
 
 export class EmbeddingUnavailableError extends Error {}
 

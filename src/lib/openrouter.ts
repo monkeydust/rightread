@@ -12,7 +12,10 @@
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 /** Cheap, fast, 1M context. Override per-deploy without touching code. */
-export const MODEL = process.env.OPENROUTER_MODEL ?? "openai/gpt-5.6-luna";
+// `|| default`, not `?? default`: Docker Compose turns a declared-but-unset
+// variable into the empty string, which `??` happily accepts and then sends
+// to the API as a blank model name.
+export const MODEL = process.env.OPENROUTER_MODEL?.trim() || "openai/gpt-5.6-luna";
 
 export type LLMMessage = { role: "system" | "user"; content: string };
 

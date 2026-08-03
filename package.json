@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --no-warnings tests/sanitize.test.mts && node --experimental-strip-types --no-warnings tests/url.test.mts && node --experimental-strip-types --no-warnings tests/tidy.test.mts && node --experimental-strip-types --no-warnings --import ./scripts/register-ts.mjs tests/classify.test.mts && node --experimental-strip-types --no-warnings --import ./scripts/register-ts.mjs tests/search.test.mts && node tests/db-merge.test.mjs",
+    "test": "node --experimental-strip-types --no-warnings tests/sanitize.test.mts && node --experimental-strip-types --no-warnings tests/url.test.mts && node --experimental-strip-types --no-warnings tests/tidy.test.mts && node --experimental-strip-types --no-warnings --import ./scripts/register-ts.mjs tests/classify.test.mts && node --experimental-strip-types --no-warnings --import ./scripts/register-ts.mjs tests/search.test.mts && node --experimental-strip-types --no-warnings --import ./scripts/register-ts.mjs tests/env.test.mts && node tests/db-merge.test.mjs",
     "db:backup": "node scripts/db-backup.mjs",
     "db:merge": "node scripts/db-merge.mjs",
     "icons": "python scripts/make-icons.py",

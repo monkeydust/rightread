@@ -1,7 +1,13 @@
 import { prisma } from "@/lib/db";
 import { ensureSearchIndex } from "./index-schema";
 import { parseQuery } from "./query";
-import { embed, fromBlob, cosine, EmbeddingUnavailableError } from "./embed";
+import {
+  embed,
+  fromBlob,
+  cosine,
+  readFloor,
+  EmbeddingUnavailableError,
+} from "./embed";
 
 export type SearchHit = {
   id: string;
@@ -39,23 +45,8 @@ export type SearchResults = {
 const EXACT_LIMIT = 50;
 const SEMANTIC_LIMIT = 10;
 
-/**
- * Below this, results are noise.
- *
- * Measured on text-embedding-3-small over a real library rather than guessed —
- * an earlier value of 0.34 was set by assumption and sat *above* most genuine
- * matches, so semantic search silently returned nothing:
- *
- *   deliberately irrelevant query ("cooking pasta recipes")   ceiling 0.151
- *   conceptual match ("data races" -> Rust ownership)                0.291
- *   direct match ("ownership" -> Rust ownership)                     0.345
- *   strong match ("react hooks" -> useEffect guide)                  0.542
- *
- * 0.22 clears the noise ceiling with headroom while admitting conceptual
- * matches. It is specific to this embedding model — changing the model means
- * re-measuring, which is what OPENROUTER_SEMANTIC_FLOOR is for.
- */
-const SEMANTIC_FLOOR = Number(process.env.OPENROUTER_SEMANTIC_FLOOR ?? 0.22);
+/** Measured cut-off below which semantic hits are noise; see readFloor. */
+const SEMANTIC_FLOOR = readFloor();
 
 type Row = {
   itemId: string;

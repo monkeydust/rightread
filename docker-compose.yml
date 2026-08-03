@@ -26,7 +26,13 @@ services:
       # pass it into the container. Anything the app reads at runtime needs an
       # explicit entry below.
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - OPENROUTER_MODEL=${OPENROUTER_MODEL}
+      # The :- defaults matter. Listing a variable here that is absent from
+      # .env.prod passes it in as an EMPTY STRING, not as unset — so without a
+      # default, adding an override knob here would blank the value it overrides.
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-openai/gpt-5.6-luna}
+      - OPENROUTER_EMBED_MODEL=${OPENROUTER_EMBED_MODEL:-openai/text-embedding-3-small}
+      # Semantic similarity cut-off; see the measurements in lib/search/search.ts.
+      - OPENROUTER_SEMANTIC_FLOOR=${OPENROUTER_SEMANTIC_FLOOR:-0.22}
     volumes:
       - sqlite_data:/app/data
 
