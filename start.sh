@@ -15,6 +15,15 @@ node scripts/drop-search-objects.mjs
 echo "Syncing database schema..."
 npx prisma db push --skip-generate
 
+# Recreate the index and its triggers straight away, rather than leaving it to
+# whenever someone first searches. Without this there is a window after every
+# restart in which the triggers do not exist; nothing is lost (the rebuild
+# reads from Item) but a save in that window is invisible to search until the
+# next rebuild. `|| true` because a warm cache is not worth failing a boot for
+# — ensureSearchIndex() still rebuilds on demand if this does not run.
+echo "Rebuilding search index..."
+npm run search:backfill -- --index-only || echo "  index rebuild skipped; it will rebuild on first search"
+
 # A missing key degrades classification silently to "other" — which is correct
 # behaviour but invisible, so say so once, loudly, where `docker logs` shows it.
 if [ -z "$OPENROUTER_API_KEY" ]; then
