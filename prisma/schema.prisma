@@ -97,6 +97,12 @@ model Item {
   textContent String?
   wordCount   Int?
 
+  /// 1536-dim float32 vector from OpenRouter, stored little-endian.
+  /// Powers semantic search; null until embedded, and null is not an error.
+  embedding      Bytes?
+  embeddingModel String?
+  embeddedAt     DateTime?
+
   /// pending | ok | failed — extraction runs async right after capture
   extractStatus String    @default("pending")
   extractError  String?

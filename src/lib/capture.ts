@@ -3,6 +3,7 @@ import { normalizeUrl, hostLabel } from "@/lib/url";
 import { extractArticle } from "@/lib/extract";
 import { classifyPage, type PageEvidence } from "@/lib/classify";
 import { publish } from "@/lib/events";
+import { embed, embeddableText, toBlob, EMBED_MODEL } from "@/lib/search/embed";
 
 /**
  * New items go to the top of the queue. Positions are sparse floats, so this
@@ -109,6 +110,8 @@ export async function runExtraction(itemId: string, url: string): Promise<void> 
       extracted: true,
     });
     notify("classified");
+
+    await embedItem(itemId, article);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[rightread] extraction failed for ${url}: ${message}`);
@@ -153,6 +156,36 @@ export async function runExtraction(itemId: string, url: string): Promise<void> 
       extracted: false,
     });
     notify("classified");
+  }
+}
+
+/**
+ * Embeds an item for semantic search.
+ *
+ * Fail-soft like classification: a missing key or a flaky upstream leaves
+ * `embedding` null, which simply means this item cannot be found semantically
+ * yet. Keyword search still covers it, and `npm run search:backfill` fills the
+ * gap later.
+ */
+async function embedItem(
+  itemId: string,
+  article: { title: string; siteName: string | null; excerpt: string | null; textContent: string }
+): Promise<void> {
+  try {
+    const vector = await embed(embeddableText(article));
+    await prisma.item.update({
+      where: { id: itemId },
+      data: {
+        embedding: toBlob(vector),
+        embeddingModel: EMBED_MODEL,
+        embeddedAt: new Date(),
+      },
+    });
+  } catch (err) {
+    console.warn(
+      `[rightread] embedding failed for item ${itemId}:`,
+      err instanceof Error ? err.message : err
+    );
   }
 }
 

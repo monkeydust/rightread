@@ -5,6 +5,7 @@ import type { ListItem } from "@/lib/items";
 import { ItemRow } from "@/components/ItemRow";
 import { AddLink } from "@/components/AddLink";
 import { Star } from "@/components/icons";
+import { SearchResults, type SearchPayload } from "@/components/SearchResults";
 
 type Props = {
   initialItems: ListItem[];
@@ -19,6 +20,14 @@ export function Library({ initialItems, status }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [starredOnly, setStarredOnly] = useState(false);
+  // Results carry the term they belong to. That makes "is this stale?" a
+  // derived question rather than something to clear imperatively — clearing
+  // state in an effect body causes a cascading render, and leaving it uncleared
+  // would flash the previous query's hits while the next one loads.
+  const [results, setResults] = useState<{
+    term: string;
+    payload: SearchPayload;
+  } | null>(null);
 
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/items?status=${status}`, { cache: "no-store" });
@@ -119,24 +128,43 @@ export function Library({ initialItems, status }: Props) {
     [items]
   );
 
+  const searchTerm = query.trim();
+
+  const current = results?.term === searchTerm ? results.payload : null;
+  const searching = searchTerm !== "" && current === null;
+
+  useEffect(() => {
+    if (!searchTerm) return;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/search?q=${encodeURIComponent(searchTerm)}`,
+          { signal: controller.signal }
+        );
+        if (!res.ok) throw new Error("search failed");
+        setResults({ term: searchTerm, payload: await res.json() });
+      } catch (err) {
+        // An abort is the expected outcome of typing another character.
+        if ((err as Error)?.name !== "AbortError") setError("Search failed");
+      }
+    }, 220);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [searchTerm]);
+
   const starredCount = useMemo(
     () => items.filter((i) => i.starred).length,
     [items]
   );
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return items.filter((i) => {
-      if (starredOnly && !i.starred) return false;
-      if (!q) return true;
-      return (
-        i.title.toLowerCase().includes(q) ||
-        (i.siteName ?? "").toLowerCase().includes(q) ||
-        i.url.toLowerCase().includes(q) ||
-        (i.excerpt ?? "").toLowerCase().includes(q)
-      );
-    });
-  }, [items, query, starredOnly]);
+  const filtered = useMemo(
+    () => (starredOnly ? items.filter((i) => i.starred) : items),
+    [items, starredOnly]
+  );
 
   // Ends of the real queue, not of the filtered view: moving an item while a
   // filter is applied still reorders it against everything, so disabling the
@@ -151,18 +179,17 @@ export function Library({ initialItems, status }: Props) {
     <div>
       {status === "unread" && <AddLink onSaved={refresh} />}
 
-      {(items.length > 6 || starredCount > 0) && (
+      {(items.length > 0 || starredCount > 0) && (
         <div className="flex gap-2 px-3 pb-2 sm:px-4">
-          {items.length > 6 && (
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Filter…"
-              className="min-w-0 flex-1 rounded-lg border bg-transparent px-3 py-2 text-sm outline-none"
-              style={{ borderColor: "var(--border)" }}
-            />
-          )}
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search everything — words, or use * and &quot;phrases&quot;"
+            aria-label="Search your library by keyword or meaning"
+            className="min-w-0 flex-1 rounded-lg border bg-transparent px-3 py-2 text-sm outline-none"
+            style={{ borderColor: "var(--border)" }}
+          />
           {starredCount > 0 && (
             <button
               type="button"
@@ -187,15 +214,15 @@ export function Library({ initialItems, status }: Props) {
         </p>
       )}
 
-      {filtered.length === 0 ? (
+      {searchTerm ? (
+        <SearchResults results={current} loading={searching} />
+      ) : filtered.length === 0 ? (
         <p
           className="px-4 py-16 text-center text-sm"
           style={{ color: "var(--text-muted)" }}
         >
           {starredOnly
-            ? "Nothing starred matches."
-            : query
-            ? "Nothing matches that filter."
+            ? "Nothing starred yet."
             : status === "archived"
               ? "Nothing archived yet."
               : "Nothing saved yet. Share a link here, or paste one above."}
