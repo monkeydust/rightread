@@ -3,6 +3,14 @@ set -e
 
 echo "=== rightread startup ==="
 
+# The FTS5 index and its triggers cannot be expressed in schema.prisma, so
+# `db push` sees unowned objects, calls dropping them data loss and refuses to
+# run — killing the container under `set -e`. Drop them first; the index is
+# derived from Item and rebuilds itself on the next search. See the long note
+# in the script for why this is done here rather than with --accept-data-loss.
+echo "Dropping derived search index before schema sync..."
+node scripts/drop-search-objects.mjs
+
 # Bring the SQLite schema up to date before serving.
 echo "Syncing database schema..."
 npx prisma db push --skip-generate
