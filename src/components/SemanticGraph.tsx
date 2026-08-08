@@ -54,8 +54,18 @@ export type GraphPayload = {
 type SimNode = SimulationNodeDatum & { id: string; r: number };
 type SimEdge = { source: SimNode | string; target: SimNode | string; score: number };
 
-const WIDTH = 1000;
-const HEIGHT = 640;
+/**
+ * Fallback frame, used only before the element has been measured.
+ *
+ * The viewBox is otherwise set to the container's real pixel size. A fixed
+ * landscape viewBox letterboxes into a portrait phone: preserveAspectRatio
+ * scales 1000x640 down to fit a ~350x550 box, which is 35% — so even a
+ * perfectly fitted layout rendered a third of the size with dead bands above
+ * and below it. Matching the viewBox to the element makes one user unit one
+ * CSS pixel, which also makes the pointer maths trivial.
+ */
+const FALLBACK_WIDTH = 1000;
+const FALLBACK_HEIGHT = 640;
 
 export function kindColour(kind: string): string {
   return (KINDS as readonly string[]).includes(kind)
@@ -185,6 +195,9 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
   // a phone where the whole thing is already scaled down to fit the screen.
   const autoFit = useRef(true);
   const fitRef = useRef<(() => void) | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const sizeRef = useRef({ w: FALLBACK_WIDTH, h: FALLBACK_HEIGHT });
+  const [size, setSize] = useState({ w: FALLBACK_WIDTH, h: FALLBACK_HEIGHT });
 
   const applyView = useCallback(() => {
     const { x, y, scale } = view.current;
@@ -194,6 +207,25 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
   /** Any deliberate pan, zoom or drag means "stop moving the camera on me". */
   const takeControl = useCallback(() => {
     autoFit.current = false;
+  }, []);
+
+  useEffect(() => {
+    const el = frameRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(() => {
+      const w = Math.max(1, Math.round(el.clientWidth));
+      const h = Math.max(1, Math.round(el.clientHeight));
+      sizeRef.current = { w, h };
+      // Only re-render for a change worth re-rendering for: on a phone the
+      // viewport height twitches by a pixel or two as the URL bar moves.
+      setSize((prev) =>
+        Math.abs(prev.w - w) > 2 || Math.abs(prev.h - h) > 2 ? { w, h } : prev
+      );
+      if (autoFit.current) fitRef.current?.();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -222,7 +254,9 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
           .strength((l) => 0.05 + l.score * 0.5)
       )
       .force("collide", forceCollide<SimNode>((d) => d.r + 4))
-      .force("center", forceCenter(WIDTH / 2, HEIGHT / 2));
+      // Centred on the origin rather than on the viewport: fit() frames the
+      // result, so where the simulation happens to settle is irrelevant.
+      .force("center", forceCenter(0, 0));
 
     /**
      * Frames the layout: scale so the nodes fill the viewport, then centre.
@@ -248,14 +282,19 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
 
       // Room for the labels, which are drawn above each node and are wider
       // than the circle they belong to.
+      const { w, h } = sizeRef.current;
+      // Labels are drawn above each node and are wider than its circle.
       const pad = 56;
       const bw = Math.max(1, maxX - minX + pad * 2);
       const bh = Math.max(1, maxY - minY + pad * 2);
-      const scale = Math.min(2.2, Math.max(0.25, Math.min(WIDTH / bw, HEIGHT / bh)));
+      // Floor is deliberately low: on a narrow phone a large library needs to
+      // zoom out past 0.2 to fit at all, and clipping nodes off-screen is
+      // worse than drawing them small — they can always be zoomed into.
+      const scale = Math.min(2.2, Math.max(0.08, Math.min(w / bw, h / bh)));
 
       view.current.scale = scale;
-      view.current.x = WIDTH / 2 - ((minX + maxX) / 2) * scale;
-      view.current.y = HEIGHT / 2 - ((minY + maxY) / 2) * scale;
+      view.current.x = w / 2 - ((minX + maxX) / 2) * scale;
+      view.current.y = h / 2 - ((minY + maxY) / 2) * scale;
       applyView();
     };
     fitRef.current = fit;
@@ -297,12 +336,89 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
   // event does not carry the pointer type.
   const tapContext = useRef({ touch: false, wasActive: false });
 
+  /**
+   * Every pointer currently down, so two of them can be recognised as a pinch.
+   *
+   * The SVG sets `touch-action: none`, which switches off the browser's own
+   * pan and zoom on this element. That is necessary — otherwise dragging a
+   * node would scroll the page — but it means pinch has to be implemented
+   * here. It was not, so on a phone there was no way to zoom at all.
+   */
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ dist: number; cx: number; cy: number } | null>(null);
+
+  const MIN_SCALE = 0.15;
+  const MAX_SCALE = 5;
+
+  /** Screen coordinates relative to the SVG. viewBox matches the element's
+   *  pixel size, so these are already user units — no matrix maths needed. */
+  const localPoint = (e: { clientX: number; clientY: number }, el: Element) => {
+    const r = el.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+
+  /** Zooms about a fixed point, so the thing under the fingers stays put. */
+  const zoomAbout = useCallback(
+    (factor: number, cx: number, cy: number) => {
+      const from = view.current.scale;
+      const to = Math.min(MAX_SCALE, Math.max(MIN_SCALE, from * factor));
+      if (to === from) return;
+      view.current.x = cx - (cx - view.current.x) * (to / from);
+      view.current.y = cy - (cy - view.current.y) * (to / from);
+      view.current.scale = to;
+      applyView();
+    },
+    [applyView]
+  );
+
   const onPointerDownBackground = (e: React.PointerEvent) => {
-    dragging.current = { id: null, px: e.clientX, py: e.clientY };
-    (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    const svg = e.currentTarget as SVGSVGElement;
+    const p = localPoint(e, svg);
+    pointers.current.set(e.pointerId, p);
+    svg.setPointerCapture(e.pointerId);
+
+    if (pointers.current.size === 2) {
+      // A second finger converts whatever was happening into a pinch.
+      const [a, b] = [...pointers.current.values()];
+      pinch.current = {
+        dist: Math.hypot(a.x - b.x, a.y - b.y),
+        cx: (a.x + b.x) / 2,
+        cy: (a.y + b.y) / 2,
+      };
+      dragging.current = null;
+      return;
+    }
+    // The node's own handler runs first (the event starts at the node and
+    // bubbles), so a drag already in progress must not be overwritten here.
+    if (pointers.current.size === 1 && dragging.current === null) {
+      dragging.current = { id: null, px: e.clientX, py: e.clientY };
+    }
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
+    const svg = e.currentTarget as SVGSVGElement;
+    if (pointers.current.has(e.pointerId)) {
+      pointers.current.set(e.pointerId, localPoint(e, svg));
+    }
+
+    // ── Two fingers: pinch to zoom, and pan by the midpoint ──
+    if (pointers.current.size >= 2) {
+      const [a, b] = [...pointers.current.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      const cx = (a.x + b.x) / 2;
+      const cy = (a.y + b.y) / 2;
+      const prev = pinch.current;
+      pinch.current = { dist, cx, cy };
+      if (!prev || prev.dist === 0) return;
+
+      takeControl();
+      // Move with the midpoint first, then scale about where it now is.
+      view.current.x += cx - prev.cx;
+      view.current.y += cy - prev.cy;
+      zoomAbout(dist / prev.dist, cx, cy);
+      return;
+    }
+
     const d = dragging.current;
     if (!d) return;
     const dx = e.clientX - d.px;
@@ -327,7 +443,9 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
     simRef.current?.alphaTarget(0.15).restart();
   };
 
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size < 2) pinch.current = null;
     if (dragging.current?.id) simRef.current?.alphaTarget(0);
     dragging.current = null;
   };
@@ -337,11 +455,17 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
     fitRef.current?.();
   };
 
+  /** Button zoom, about the middle of the frame. Touch needs a route to zoom
+   *  that does not depend on getting a two-finger gesture right. */
+  const nudgeZoom = (factor: number) => {
+    takeControl();
+    zoomAbout(factor, sizeRef.current.w / 2, sizeRef.current.h / 2);
+  };
+
   const onWheel = (e: React.WheelEvent) => {
     takeControl();
-    const next = Math.min(3, Math.max(0.3, view.current.scale * (e.deltaY < 0 ? 1.12 : 0.89)));
-    view.current.scale = next;
-    applyView();
+    const p = localPoint(e, e.currentTarget as SVGSVGElement);
+    zoomAbout(e.deltaY < 0 ? 1.12 : 0.89, p.x, p.y);
   };
 
   // ── States that are not a graph ───────────────────────────────────
@@ -405,12 +529,13 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
       />
 
       <div
-        className="relative mt-3 overflow-hidden rounded-lg border"
+        ref={frameRef}
+        className="relative mt-3 h-[68vh] max-h-[720px] min-h-[380px] overflow-hidden rounded-lg border sm:h-[640px]"
         style={{ borderColor: "var(--border)", background: "var(--bg-subtle)" }}
       >
         <svg
-          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-          className="block h-[65vh] max-h-[640px] min-h-[380px] w-full touch-none sm:h-[640px]"
+          viewBox={`0 0 ${size.w} ${size.h}`}
+          className="block h-full w-full touch-none"
           role="img"
           aria-label={`Semantic graph: ${visible.nodes.length} saved pages, ${visible.edges.length} connections. A text version follows below.`}
           onPointerDown={onPointerDownBackground}
@@ -525,6 +650,43 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
           </g>
         </svg>
 
+        <div className="absolute right-2 top-2 flex flex-col gap-1">
+          {[
+            { label: "+", title: "Zoom in", factor: 1.3 },
+            { label: "−", title: "Zoom out", factor: 0.77 },
+          ].map((b) => (
+            <button
+              key={b.title}
+              type="button"
+              title={b.title}
+              aria-label={b.title}
+              onClick={() => nudgeZoom(b.factor)}
+              className="size-8 rounded-md border text-[15px] leading-none backdrop-blur transition-colors hover:bg-[var(--bg-subtle)]"
+              style={{
+                borderColor: "var(--border)",
+                color: "var(--text)",
+                background: "color-mix(in srgb, var(--bg) 80%, transparent)",
+              }}
+            >
+              {b.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            title="Fit to view"
+            aria-label="Fit to view"
+            onClick={resetView}
+            className="size-8 rounded-md border text-[11px] leading-none backdrop-blur transition-colors hover:bg-[var(--bg-subtle)]"
+            style={{
+              borderColor: "var(--border)",
+              color: "var(--text)",
+              background: "color-mix(in srgb, var(--bg) 80%, transparent)",
+            }}
+          >
+            Fit
+          </button>
+        </div>
+
         {activeNode && (
           <div
             className="pointer-events-none absolute bottom-2 left-2 right-2 rounded-md border px-3 py-2 text-[12px] sm:right-auto sm:max-w-md"
@@ -555,14 +717,6 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
             Tap a page to see it, tap again to read. Drag to pan, pinch to zoom.
           </span>
         </p>
-        <button
-          type="button"
-          onClick={resetView}
-          className="shrink-0 rounded-md border px-2 py-1 text-[12px] leading-none transition-colors hover:bg-[var(--bg-subtle)]"
-          style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}
-        >
-          Fit
-        </button>
       </div>
 
       <TextFallback data={data} />
