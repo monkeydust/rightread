@@ -3,8 +3,13 @@ import { signOut } from "@/auth";
 import { Wordmark } from "@/components/Wordmark";
 
 type Props = {
-  active: "queue" | "archive";
+  active: "queue" | "archive" | "graph";
   counts: { unread: number; archived: number };
+  /**
+   * The graph needs room to be legible; the reading views deliberately do not.
+   * An opt-in prop rather than a wider default, so nothing else changes.
+   */
+  wide?: boolean;
   children: React.ReactNode;
 };
 
@@ -45,9 +50,9 @@ function Tab({
   );
 }
 
-export function AppShell({ active, counts, children }: Props) {
+export function AppShell({ active, counts, wide = false, children }: Props) {
   return (
-    <div className="mx-auto min-h-dvh max-w-2xl">
+    <div className={`mx-auto min-h-dvh ${wide ? "max-w-6xl" : "max-w-2xl"}`}>
       <header
         className="sticky top-0 z-10 border-b px-3 pt-4 backdrop-blur sm:px-4"
         style={{
@@ -95,6 +100,9 @@ export function AppShell({ active, counts, children }: Props) {
           </Tab>
           <Tab href="/archive" active={active === "archive"}>
             Archive{counts.archived ? ` (${counts.archived})` : ""}
+          </Tab>
+          <Tab href="/graph" active={active === "graph"}>
+            Graph
           </Tab>
         </nav>
       </header>

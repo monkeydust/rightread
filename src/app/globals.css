@@ -78,6 +78,46 @@
   --paper-text: #e8e5dc;
 }
 
+/* ── Page-kind colours, used by the semantic graph ──────────────────
+   Kept in their own block rather than folded into the four theme blocks
+   above, so the palette is legible as a palette and the existing tokens are
+   left alone. Chosen to sit beside the coral accent without competing with
+   it, and darkened for cream / lightened for black so every hue keeps its
+   contrast in both themes. */
+:root {
+  --kind-conversation: #c2603f;
+  --kind-article: #3d7ea6;
+  --kind-blog: #5c8a4a;
+  --kind-reference: #7a5ea8;
+  --kind-other: #8a8780;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --kind-conversation: #e08b6a;
+    --kind-article: #6fb0d8;
+    --kind-blog: #8fc47a;
+    --kind-reference: #b39ae0;
+    --kind-other: #9a978f;
+  }
+}
+
+:root[data-theme="light"] {
+  --kind-conversation: #c2603f;
+  --kind-article: #3d7ea6;
+  --kind-blog: #5c8a4a;
+  --kind-reference: #7a5ea8;
+  --kind-other: #8a8780;
+}
+
+:root[data-theme="dark"] {
+  --kind-conversation: #e08b6a;
+  --kind-article: #6fb0d8;
+  --kind-blog: #8fc47a;
+  --kind-reference: #b39ae0;
+  --kind-other: #9a978f;
+}
+
 html {
   background: var(--bg);
   color-scheme: light dark;

@@ -35,6 +35,10 @@ matter, and an archive for things you've finished.
 that finds pages about what you asked even when they never use your words.
 Results stay in separate labelled groups — see [Search](#search).
 
+**See how it connects.** A force-directed map of the whole library, built from
+the same embeddings, where clusters are reading interests nobody declared —
+see [Graph](#graph).
+
 ## Stack
 
 Next.js 16 · React 19 · Prisma + SQLite · Auth.js (magic link via Resend) ·
@@ -65,6 +69,8 @@ the server console** — copy it from there.
 | `OPENROUTER_MODEL` | Defaults to `openai/gpt-5.6-luna`. One model for all of rightread. |
 | `OPENROUTER_EMBED_MODEL` | Defaults to `openai/text-embedding-3-small`. Changing it invalidates stored vectors — re-run `search:backfill --force`. |
 | `OPENROUTER_SEMANTIC_FLOOR` | Similarity cut-off, 0–1. Defaults to `0.22` (measured — see [Search](#search)). |
+| `GRAPH_EDGE_FLOOR` | Graph noise guard, 0–1. Defaults to `0.15`. Document-to-document, so **not** the same quantity as the two floors above. |
+| `GRAPH_MAX_NODES` | Cap on graph size. Defaults to `2000`; anything omitted is reported in the UI. |
 
 > Any variable the app reads at runtime needs an explicit entry under
 > `environment:` in `docker-compose.yml`. `--env-file` only makes it available
@@ -195,6 +201,57 @@ Existing items are indexed with `npm run search:backfill`. Startup rebuilds the
 keyword index automatically — it has to be dropped before `prisma db push`,
 which would otherwise refuse to run rather than drop objects it does not own.
 
+## Graph
+
+`/graph` places every saved page near the ones it resembles, using the same
+embeddings as search. Nothing is tagged by hand and no new API calls are made —
+the vectors already exist, so this is arithmetic over data already paid for.
+
+Colour is the page kind, size is length, line weight is connection strength,
+and a dashed coral line means the two pages are the same article saved twice.
+Hovering isolates a neighbourhood; the whole thing is also rendered as a plain
+list, which is both the accessible path and often the faster answer to "what is
+this actually near?".
+
+**Edges are top-k per page, not a global threshold.** Each page keeps links to
+its k most similar neighbours (2–8, default 4). Edge count is then bounded by
+`n·k`, so density stays constant as the library grows — it cannot collapse into
+a hairball, and no page is ever stranded.
+
+**The strength bands calibrate themselves.** This is the part that matters.
+Measured across 21,321 real pairs:
+
+| | Cosine |
+|---|---|
+| median pair | 0.241 |
+| 90th percentile | 0.417 |
+| 99th percentile | 0.571 |
+
+Two *unrelated* long documents still score ~0.24, because they share the "this
+is long English prose" direction — `src/lib/sources/similar.ts` hit the same
+wall independently, shipping bad recommendations at a fixed 0.38. So a constant
+cannot separate "related" from "both are prose": 0.43 sounds close and is
+merely the 90th percentile, one random pair in ten.
+
+Instead the bands are derived from the user's own corpus at build time, so
+**strong** means "closer than 99% of pairs in *this* library" — which stays
+true if the embedding model changes or the library is all one topic. The legend
+states the bands in those terms rather than showing a bare cosine, so the
+picture does not imply more than the data supports.
+
+Mean-centering the corpus — the textbook fix for the shared-prose direction —
+was tried and rejected: on the same 207 documents it left neighbour rankings
+essentially unchanged while *reducing* spread (sd 0.118 → 0.103). Top-k depends
+only on ordering, so it bought nothing.
+
+Layout is `d3-force` (simulation only; the rendering is ours), drawn as SVG so
+hit-testing, focus and theming come free. Positions are written straight to SVG
+attributes rather than through React state — a `setState` per node per frame
+would make React the bottleneck and the settle would visibly stutter.
+
+Cost at 207 nodes: 21,321 pairs scored in **44 ms**, giving 709 edges at 3.3%
+density with no isolated nodes.
+
 ## How it works
 
 | Area | Where |
@@ -254,7 +311,7 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for the full procedure.
 ```bash
 npm run dev          # dev server
 npm run build        # production build
-npm test             # sanitize, url, tidy, classify, search, env and db-merge suites
+npm test             # sanitize, url, tidy, classify, search, graph, env and db-merge suites
 npm run lint
 npm run db:backup    # timestamped, keeps the last 20
 npm run db:merge     # additive merge between two databases

@@ -33,6 +33,12 @@ services:
       - OPENROUTER_EMBED_MODEL=${OPENROUTER_EMBED_MODEL:-openai/text-embedding-3-small}
       # Semantic similarity cut-off; see the measurements in lib/search/search.ts.
       - OPENROUTER_SEMANTIC_FLOOR=${OPENROUTER_SEMANTIC_FLOOR:-0.22}
+      # Graph edge floor — a noise guard, not a relevance threshold; the
+      # percentile banding does that work and calibrates itself per library.
+      # NOT interchangeable with OPENROUTER_SEMANTIC_FLOOR above, which is
+      # query-to-document. This one is document-to-document.
+      - GRAPH_EDGE_FLOOR=${GRAPH_EDGE_FLOOR:-0.15}
+      - GRAPH_MAX_NODES=${GRAPH_MAX_NODES:-2000}
     volumes:
       - sqlite_data:/app/data
 
