@@ -178,9 +178,22 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
   const simRef = useRef<Simulation<SimNode, undefined> | null>(null);
   const view = useRef({ x: 0, y: 0, scale: 1 });
 
+  // Keep fitting the view to the layout until the reader takes control. The
+  // simulation settles into whatever area the forces dictate, which for nine
+  // nodes is a small knot in the middle of a canvas sized for two hundred —
+  // so a fixed viewBox renders a handful of items as a speck, worst of all on
+  // a phone where the whole thing is already scaled down to fit the screen.
+  const autoFit = useRef(true);
+  const fitRef = useRef<(() => void) | null>(null);
+
   const applyView = useCallback(() => {
     const { x, y, scale } = view.current;
     viewRef.current?.setAttribute("transform", `translate(${x},${y}) scale(${scale})`);
+  }, []);
+
+  /** Any deliberate pan, zoom or drag means "stop moving the camera on me". */
+  const takeControl = useCallback(() => {
+    autoFit.current = false;
   }, []);
 
   useEffect(() => {
@@ -211,6 +224,42 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
       .force("collide", forceCollide<SimNode>((d) => d.r + 4))
       .force("center", forceCenter(WIDTH / 2, HEIGHT / 2));
 
+    /**
+     * Frames the layout: scale so the nodes fill the viewport, then centre.
+     *
+     * Capped at 2.2x because fitting three nodes exactly would blow them up to
+     * absurd size — past that point the graph should sit smaller in a roomy
+     * canvas rather than fill it.
+     */
+    const fit = () => {
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const n of sim) {
+        const x = n.x ?? 0;
+        const y = n.y ?? 0;
+        minX = Math.min(minX, x - n.r);
+        minY = Math.min(minY, y - n.r);
+        maxX = Math.max(maxX, x + n.r);
+        maxY = Math.max(maxY, y + n.r);
+      }
+      if (!Number.isFinite(minX)) return;
+
+      // Room for the labels, which are drawn above each node and are wider
+      // than the circle they belong to.
+      const pad = 56;
+      const bw = Math.max(1, maxX - minX + pad * 2);
+      const bh = Math.max(1, maxY - minY + pad * 2);
+      const scale = Math.min(2.2, Math.max(0.25, Math.min(WIDTH / bw, HEIGHT / bh)));
+
+      view.current.scale = scale;
+      view.current.x = WIDTH / 2 - ((minX + maxX) / 2) * scale;
+      view.current.y = HEIGHT / 2 - ((minY + maxY) / 2) * scale;
+      applyView();
+    };
+    fitRef.current = fit;
+
     simulation.on("tick", () => {
       for (const n of sim) {
         const el = nodeEls.current.get(n.id);
@@ -227,17 +276,26 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
         el.setAttribute("x2", String(b.x ?? 0));
         el.setAttribute("y2", String(b.y ?? 0));
       }
+      if (autoFit.current) fit();
     });
+
+    // A fresh layout re-frames itself; only an explicit gesture opts out.
+    autoFit.current = true;
 
     simRef.current = simulation;
     return () => {
       simulation.stop();
       simRef.current = null;
+      fitRef.current = null;
     };
-  }, [visible]);
+  }, [visible, applyView]);
 
   // ── Pan and zoom ──────────────────────────────────────────────────
   const dragging = useRef<{ id: string | null; px: number; py: number } | null>(null);
+  // A phone has no hover, so a first tap has to be able to mean "show me what
+  // this is" rather than "open it". Recorded on pointerdown because the click
+  // event does not carry the pointer type.
+  const tapContext = useRef({ touch: false, wasActive: false });
 
   const onPointerDownBackground = (e: React.PointerEvent) => {
     dragging.current = { id: null, px: e.clientX, py: e.clientY };
@@ -253,6 +311,9 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
     d.py = e.clientY;
 
     if (d.id === null) {
+      // Only count it as taking control once the pointer has actually moved —
+      // a plain tap on the background should not freeze the camera.
+      takeControl();
       view.current.x += dx;
       view.current.y += dy;
       applyView();
@@ -260,6 +321,7 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
     }
     const node = simRef.current?.nodes().find((n) => n.id === d.id);
     if (!node) return;
+    takeControl();
     node.fx = (node.fx ?? node.x ?? 0) + dx / view.current.scale;
     node.fy = (node.fy ?? node.y ?? 0) + dy / view.current.scale;
     simRef.current?.alphaTarget(0.15).restart();
@@ -270,7 +332,13 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
     dragging.current = null;
   };
 
+  const resetView = () => {
+    autoFit.current = true;
+    fitRef.current?.();
+  };
+
   const onWheel = (e: React.WheelEvent) => {
+    takeControl();
     const next = Math.min(3, Math.max(0.3, view.current.scale * (e.deltaY < 0 ? 1.12 : 0.89)));
     view.current.scale = next;
     applyView();
@@ -311,6 +379,8 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
 
   const nodeById = new Map((data?.nodes ?? []).map((n) => [n.id, n]));
   const activeNode = active ? nodeById.get(active) : null;
+  // Few enough nodes that every label fits without becoming a wall of text.
+  const labelAll = visible.nodes.length <= 25;
 
   return (
     <div className="px-3 pb-16 sm:px-4">
@@ -340,7 +410,7 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
       >
         <svg
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-          className="block h-[520px] w-full touch-none sm:h-[640px]"
+          className="block h-[65vh] max-h-[640px] min-h-[380px] w-full touch-none sm:h-[640px]"
           role="img"
           aria-label={`Semantic graph: ${visible.nodes.length} saved pages, ${visible.edges.length} connections. A text version follows below.`}
           onPointerDown={onPointerDownBackground}
@@ -392,12 +462,23 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
                     onPointerLeave={() => setActive(null)}
                     onPointerDown={(e) => {
                       e.stopPropagation();
+                      tapContext.current = {
+                        touch: e.pointerType === "touch",
+                        wasActive: active === n.id,
+                      };
                       dragging.current = { id: n.id, px: e.clientX, py: e.clientY };
                       (e.currentTarget.ownerSVGElement as SVGSVGElement)?.setPointerCapture(
                         e.pointerId
                       );
                     }}
-                    onClick={() => router.push(`/read/${n.id}`)}
+                    onClick={() => {
+                      const { touch, wasActive } = tapContext.current;
+                      if (touch && !wasActive) {
+                        setActive(n.id);
+                        return;
+                      }
+                      router.push(`/read/${n.id}`);
+                    }}
                     onDoubleClick={() => {
                       const node = simRef.current?.nodes().find((s) => s.id === n.id);
                       if (node) {
@@ -421,7 +502,7 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
                       strokeDasharray={n.linked ? undefined : "3 2"}
                       fillOpacity={n.status === "archived" ? 0.4 : 0.92}
                     />
-                    {(active === n.id || n.starred) && (
+                    {(labelAll || active === n.id || n.starred) && (
                       <text
                         y={-r - 6}
                         textAnchor="middle"
@@ -465,9 +546,24 @@ export function SemanticGraph({ initial }: { initial: GraphPayload | null }) {
         )}
       </div>
 
-      <p className="mt-2 text-[12px]" style={{ color: "var(--text-muted)" }}>
-        Drag to pan, scroll to zoom, drag a page to pin it, double-click to release. Click to read.
-      </p>
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>
+          <span className="hidden sm:inline">
+            Drag to pan, scroll to zoom, drag a page to pin it, double-click to release. Click to read.
+          </span>
+          <span className="sm:hidden">
+            Tap a page to see it, tap again to read. Drag to pan, pinch to zoom.
+          </span>
+        </p>
+        <button
+          type="button"
+          onClick={resetView}
+          className="shrink-0 rounded-md border px-2 py-1 text-[12px] leading-none transition-colors hover:bg-[var(--bg-subtle)]"
+          style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}
+        >
+          Fit
+        </button>
+      </div>
 
       <TextFallback data={data} />
     </div>
