@@ -201,6 +201,18 @@ export function ItemRow({
             {savedLabel(item.savedAt)}
           </time>
 
+          {item.recommended && (
+            <>
+              <span aria-hidden>·</span>
+              <span
+                title="Saved from your recommendation sources"
+                style={{ color: "var(--accent)" }}
+              >
+                recommended
+              </span>
+            </>
+          )}
+
           {extracting && (
             <>
               <span aria-hidden>·</span>

@@ -78,14 +78,34 @@ function isPrivateHost(hostname: string): boolean {
   return false;
 }
 
+export type SafeFetchOptions = {
+  /**
+   * Content types this caller can actually use; anything else throws rather
+   * than being handed to a parser that expects something different.
+   */
+  contentTypes: RegExp;
+  /** The Accept header to send. */
+  accept: string;
+  /**
+   * Follow <meta refresh> / location.replace bounces inside 200 responses.
+   * Only meaningful for HTML — a feed is never a client-side redirect page.
+   */
+  followClientRedirects?: boolean;
+};
+
 /**
- * Fetches a URL for extraction.
+ * Fetches a user-supplied URL server-side, safely.
  *
- * Capture requests are user-supplied URLs fetched by the server, so this is an
- * SSRF surface: we re-check the host on every redirect hop rather than trusting
- * the original, and refuse anything resolving to a private range.
+ * Every fetch of a URL the user (or a feed the user subscribed to) provided is
+ * an SSRF surface: we re-check the host on every redirect hop rather than
+ * trusting the original, and refuse anything resolving to a private range.
+ * This is the single hardened front door — article extraction and feed
+ * fetching both come through here so the protections cannot drift apart.
  */
-async function fetchArticle(url: string): Promise<{ html: string; finalUrl: string }> {
+export async function safeFetch(
+  url: string,
+  opts: SafeFetchOptions
+): Promise<{ body: string; finalUrl: string }> {
   let current = url;
 
   for (let hop = 0; hop < 5; hop++) {
@@ -102,7 +122,7 @@ async function fetchArticle(url: string): Promise<{ html: string; finalUrl: stri
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: {
         "User-Agent": USER_AGENT,
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        Accept: opts.accept,
         "Accept-Language": "en-GB,en;q=0.9",
       },
     });
@@ -117,8 +137,8 @@ async function fetchArticle(url: string): Promise<{ html: string; finalUrl: stri
     if (!res.ok) throw new Error(`Fetch failed: HTTP ${res.status}`);
 
     const type = res.headers.get("content-type") ?? "";
-    if (!/text\/html|application\/xhtml/i.test(type)) {
-      throw new Error(`Not an HTML page (${type.split(";")[0] || "unknown type"})`);
+    if (!opts.contentTypes.test(type)) {
+      throw new Error(`Unexpected content type (${type.split(";")[0] || "unknown type"})`);
     }
 
     const declared = Number(res.headers.get("content-length") ?? 0);
@@ -127,20 +147,32 @@ async function fetchArticle(url: string): Promise<{ html: string; finalUrl: stri
     const buf = await res.arrayBuffer();
     if (buf.byteLength > MAX_BYTES) throw new Error("Page too large");
 
-    const html = new TextDecoder("utf-8").decode(buf);
+    const body = new TextDecoder("utf-8").decode(buf);
 
     // A 200 that is really a redirect. Re-enters the loop so the destination
     // gets the same private-address check as any other hop.
-    const bounce = findClientRedirect(html, current);
-    if (bounce && bounce !== current) {
-      current = bounce;
-      continue;
+    if (opts.followClientRedirects) {
+      const bounce = findClientRedirect(body, current);
+      if (bounce && bounce !== current) {
+        current = bounce;
+        continue;
+      }
     }
 
-    return { html, finalUrl: current };
+    return { body, finalUrl: current };
   }
 
   throw new Error("Too many redirects");
+}
+
+/** Fetches a page for article extraction. */
+async function fetchArticle(url: string): Promise<{ html: string; finalUrl: string }> {
+  const { body, finalUrl } = await safeFetch(url, {
+    contentTypes: /text\/html|application\/xhtml/i,
+    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    followClientRedirects: true,
+  });
+  return { html: body, finalUrl };
 }
 
 function firstImage(doc: Document, baseUrl: string): string | null {

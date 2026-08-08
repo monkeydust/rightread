@@ -23,6 +23,8 @@ model User {
   sessions      Session[]
   items         Item[]
   captureTokens CaptureToken[]
+  sources       Source[]
+  candidates    Candidate[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -116,6 +118,10 @@ model Item {
   kindSource     String  @default("none")
   kindReason     String?
 
+  /// Saved via the recommendations panel rather than a capture path. Purely
+  /// provenance — shown as a chip in the list, never affects ordering.
+  recommended Boolean @default(false)
+
   /// unread | archived
   status   String    @default("unread")
   /// A marker you can filter by — deliberately NOT an ordering bucket.
@@ -138,4 +144,76 @@ model Item {
   @@index([userId, starred])
   @@index([userId, kind])
   @@index([userId, savedAt])
+}
+
+// ─── Recommendations ────────────────────────────────────────
+
+/// A curated RSS/Atom feed the user wants recommendations drawn from.
+/// Recommendations come ONLY from these — there is no discovery beyond them.
+model Source {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  feedUrl String
+  /// From the feed's own <title>; filled on first successful fetch.
+  title   String?
+  siteUrl String?
+  active  Boolean @default(true)
+
+  /// Fetch bookkeeping. lastError is cleared on any successful poll, so a
+  /// non-null value always describes the most recent attempt.
+  lastFetchedAt DateTime?
+  lastError     String?
+
+  createdAt  DateTime    @default(now())
+  candidates Candidate[]
+
+  @@unique([userId, feedUrl])
+  @@index([userId])
+}
+
+/// An article discovered in a Source's feed — a recommendation *candidate*,
+/// deliberately not an Item. Items are the user's library and must never be
+/// polluted by (or pruned along with) machine-fetched articles. Saving a
+/// candidate goes through the normal capture flow, which creates a real Item;
+/// savedItemId then excludes it from future recommendations.
+model Candidate {
+  id       String @id @default(cuid())
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceId String
+  source   Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  url         String
+  resolvedUrl String?
+  title       String    @default("Untitled")
+  siteName    String?
+  excerpt     String?
+  publishedAt DateTime?
+
+  /// Plain text of the full article, kept so a model change can re-embed
+  /// without refetching every page. No contentHtml: candidates are never
+  /// rendered, only scored.
+  textContent String?
+  wordCount   Int?
+
+  /// Same encoding as Item.embedding (float32 LE blob) so the two score
+  /// against each other directly.
+  embedding      Bytes?
+  embeddingModel String?
+  embeddedAt     DateTime?
+
+  /// pending | ok | failed — full-text extraction of the candidate's page
+  extractStatus String  @default("pending")
+  extractError  String?
+
+  /// Set when the user saves this recommendation into their queue.
+  savedItemId String?
+
+  firstSeenAt DateTime @default(now())
+
+  @@unique([userId, url])
+  @@index([userId, embeddedAt])
+  @@index([sourceId, firstSeenAt])
 }

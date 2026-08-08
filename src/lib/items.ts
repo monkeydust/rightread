@@ -19,6 +19,7 @@ const LIST_FIELDS = {
   kindSource: true,
   position: true,
   progress: true,
+  recommended: true,
   savedAt: true,
 } as const;
 
@@ -40,6 +41,7 @@ export type ListItem = {
   kindSource: string;
   position: number;
   progress: number;
+  recommended: boolean;
   savedAt: Date;
 };
 

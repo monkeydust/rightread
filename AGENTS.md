@@ -8,7 +8,12 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 Read-later. Capture a link from anywhere, extract the article text, read it clean and offline.
 
-No AI layer by design — capture, extract, read, prioritize. That's it.
+The core loop is deliberately manual — capture, extract, read, prioritize.
+AI sits at the edges, never in the way: page-kind classification
+(`src/lib/classify/`), semantic search over stored embeddings
+(`src/lib/search/`), and source-curated recommendations (`src/lib/sources/`).
+All of it is fail-soft by contract: an LLM or embedding failure must never
+break a capture, a search, or a page render.
 
 ## Capture paths (all hit `POST /api/capture`)
 - **PWA share target** — installed on Android, appears in the system share sheet.
@@ -28,3 +33,13 @@ in `Item.contentHtml`. Sanitization is not optional: that HTML is rendered with
 `Item.position` is a float. Moving an item between two neighbours sets its
 position to their midpoint, so a reorder writes one row, not the whole list.
 Pinned items sort above unpinned.
+
+## Recommendations
+Embedding-similar articles drawn **only** from RSS/Atom feeds the user added
+in settings (`Source` → `Candidate` in the schema; `src/lib/sources/`). A
+15-minute in-process poller (started by `src/instrumentation.ts`) admits new
+feed entries as candidates, full-text-extracts and embeds them, and prunes
+old ones. Candidates are deliberately not Items — the library is never
+polluted by machine-fetched articles, and saving a recommendation goes
+through the normal capture flow. The reader shows the panel only when
+something clears the measured similarity floor shared with semantic search.

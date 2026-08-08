@@ -5,6 +5,7 @@ import { getItem } from "@/lib/items";
 import { hostLabel } from "@/lib/url";
 import { readingMinutes } from "@/lib/extract";
 import { ReaderControls } from "@/components/ReaderControls";
+import { Recommendations } from "@/components/Recommendations";
 
 export const dynamic = "force-dynamic";
 
@@ -159,6 +160,8 @@ export default async function ReadPage(props: PageProps<"/read/[id]">) {
             dangerouslySetInnerHTML={{ __html: item.contentHtml }}
           />
         )}
+
+        <Recommendations userId={session.user.id} itemId={item.id} />
       </article>
     </div>
   );

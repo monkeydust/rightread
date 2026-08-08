@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
 import { TokenManager } from "@/components/TokenManager";
+import { SourceManager } from "@/components/SourceManager";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Settings — rightread" };
@@ -16,6 +17,22 @@ export default async function SettingsPage() {
     orderBy: { createdAt: "desc" },
     select: { id: true, name: true, lastUsedAt: true, createdAt: true },
   });
+
+  const sources = (
+    await prisma.source.findMany({
+      where: { userId: session.user.id },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        feedUrl: true,
+        title: true,
+        active: true,
+        lastFetchedAt: true,
+        lastError: true,
+        _count: { select: { candidates: true } },
+      },
+    })
+  ).map(({ _count, ...s }) => ({ ...s, candidateCount: _count.candidates }));
 
   return (
     <div className="mx-auto min-h-dvh max-w-2xl px-4 py-6">
@@ -33,6 +50,10 @@ export default async function SettingsPage() {
       </p>
 
       <div className="mt-8">
+        <SourceManager sources={sources} />
+      </div>
+
+      <div className="mt-10">
         <TokenManager tokens={tokens} />
       </div>
 
