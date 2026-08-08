@@ -14,19 +14,21 @@ datasource db {
 // ─── Auth.js Models ─────────────────────────────────────────
 
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String    @unique
-  emailVerified DateTime?
-  image         String?
-  accounts      Account[]
-  sessions      Session[]
-  items         Item[]
-  captureTokens CaptureToken[]
-  sources       Source[]
-  candidates    Candidate[]
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id              String           @id @default(cuid())
+  name            String?
+  email           String           @unique
+  emailVerified   DateTime?
+  image           String?
+  accounts        Account[]
+  sessions        Session[]
+  items           Item[]
+  captureTokens   CaptureToken[]
+  sources         Source[]
+  candidates      Candidate[]
+  keyPhrases      KeyPhrase[]
+  recommendations Recommendation[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 }
 
 model Account {
@@ -211,9 +213,68 @@ model Candidate {
   /// Set when the user saves this recommendation into their queue.
   savedItemId String?
 
+  recommendations Recommendation[]
+
   firstSeenAt DateTime @default(now())
+
+  /// Set when the user says "not interested". Deliberately on the candidate
+  /// rather than on the Recommendation: dismissing an article under one key
+  /// phrase must not let a different phrase resurface it an hour later.
+  dismissedAt DateTime?
 
   @@unique([userId, url])
   @@index([userId, embeddedAt])
   @@index([sourceId, firstSeenAt])
+}
+
+/// A standing semantic query — an interest declared once, matched against
+/// everything the listeners bring in from then on.
+model KeyPhrase {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  text   String
+  active Boolean @default(true)
+
+  /// Same float32 LE blob as Item/Candidate, so it scores against them
+  /// directly. Embedded once on create; re-embedded if the text is edited.
+  embedding      Bytes?
+  embeddingModel String?
+  embeddedAt     DateTime?
+
+  /// Watermark: only candidates embedded after this are scored on a sweep, so
+  /// a poll costs what arrived rather than the whole pool. Cleared on edit,
+  /// which backfills the phrase against everything already held.
+  lastMatchedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, text])
+  @@index([userId, active])
+}
+
+/// Why a candidate was surfaced. One row per (candidate, origin) pair.
+model Recommendation {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  /// "phrase" | "item", and the id of whichever it was.
+  ///
+  /// Two plain columns rather than two nullable foreign keys: SQLite treats
+  /// NULLs as distinct in a unique index, so a nullable key cannot stop the
+  /// same pair being inserted twice on the next sweep.
+  originKind String
+  originId   String
+
+  score     Float
+  createdAt DateTime @default(now())
+
+  @@unique([userId, candidateId, originKind, originId])
+  @@index([userId, score])
+  @@index([originKind, originId])
 }

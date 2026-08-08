@@ -32,6 +32,11 @@ export async function fetchFeed(feedUrl: string): Promise<ParsedFeed> {
     contentTypes: /xml|rss|atom|text\/plain|octet-stream/i,
     accept:
       "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.7",
+    // Full-content feeds inline every post's body: danluu.com's Atom feed is
+    // several times the default page ceiling, which made the site unaddable
+    // with a misleading "too large" error. Still bounded, just bounded for
+    // what a feed actually is.
+    maxBytes: 48 * 1024 * 1024,
   });
   return parseFeed(body, finalUrl);
 }

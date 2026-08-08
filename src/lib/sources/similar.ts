@@ -67,6 +67,14 @@ function recFloor(): number {
 const FLOOR = recFloor();
 
 /**
+ * Exported so the save-time matcher in lib/phrases/match.ts uses the same
+ * measured value. Both are article-to-article comparisons, so they must share
+ * a floor — the key-phrase path deliberately does not, because a phrase is
+ * short and that is a different distribution entirely.
+ */
+export const ITEM_MATCH_FLOOR = FLOOR;
+
+/**
  * Ranks the user's candidate pool against one item's embedding.
  *
  * The mirror image of semanticSearch() in search/search.ts: brute-force

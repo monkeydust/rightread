@@ -42,6 +42,13 @@ export async function refreshAllSources(): Promise<void> {
     for (const s of sources) {
       await refreshSource(s.id);
     }
+
+    // Phrases are matched after the sweep, not during it: a phrase should be
+    // scored against everything that arrived this cycle, whichever source it
+    // came from, and scoring per-source would re-read the same phrase vectors
+    // once per feed.
+    const { matchAllPhrases } = await import("@/lib/phrases/match");
+    await matchAllPhrases();
   } catch (err) {
     console.warn(
       "[sources] refresh sweep failed:",

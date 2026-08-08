@@ -20,6 +20,13 @@ const USER_AGENT =
   "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 rightread/0.1";
 
 const FETCH_TIMEOUT_MS = 20_000;
+
+/**
+ * Default ceiling, sized for an article page. Callers can raise it: a
+ * full-content Atom feed carries every post a site has ever published and is
+ * legitimately far larger than any single page — danluu.com's is several times
+ * this, which silently made the site impossible to add as a source.
+ */
 const MAX_BYTES = 8 * 1024 * 1024;
 
 /**
@@ -91,6 +98,8 @@ export type SafeFetchOptions = {
    * Only meaningful for HTML — a feed is never a client-side redirect page.
    */
   followClientRedirects?: boolean;
+  /** Overrides the default size ceiling. Still bounded — never unlimited. */
+  maxBytes?: number;
 };
 
 /**
@@ -141,11 +150,15 @@ export async function safeFetch(
       throw new Error(`Unexpected content type (${type.split(";")[0] || "unknown type"})`);
     }
 
+    const limit = opts.maxBytes ?? MAX_BYTES;
+    const tooBig = (n: number) =>
+      new Error(`Too large: ${Math.round(n / 1024 / 1024)}MB, limit ${Math.round(limit / 1024 / 1024)}MB`);
+
     const declared = Number(res.headers.get("content-length") ?? 0);
-    if (declared > MAX_BYTES) throw new Error("Page too large");
+    if (declared > limit) throw tooBig(declared);
 
     const buf = await res.arrayBuffer();
-    if (buf.byteLength > MAX_BYTES) throw new Error("Page too large");
+    if (buf.byteLength > limit) throw tooBig(buf.byteLength);
 
     const body = new TextDecoder("utf-8").decode(buf);
 

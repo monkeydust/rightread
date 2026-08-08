@@ -112,6 +112,15 @@ export async function runExtraction(itemId: string, url: string): Promise<void> 
     notify("classified");
 
     await embedItem(itemId, article);
+
+    // Now that the item has a vector, see what the listeners already hold that
+    // resembles it. Costs no API call — both sides are already embedded — and
+    // is fail-soft inside, so a recommendation that cannot be written never
+    // affects the capture that triggered it.
+    if (owner?.userId) {
+      const { recommendForItem } = await import("@/lib/phrases/match");
+      await recommendForItem(owner.userId, itemId);
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[rightread] extraction failed for ${url}: ${message}`);
