@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { CopyArticle } from "@/components/CopyArticle";
 
 type Theme = "light" | "sepia" | "dark";
 
@@ -9,7 +10,7 @@ const SCALES = [0.85, 0.925, 1, 1.1, 1.25, 1.45];
 const WIDTHS = ["34rem", "40rem", "48rem"];
 
 /**
- * Reader chrome: theme, text size, width, and mark-as-done.
+ * Reader chrome: theme, text size, width, copy, and mark-as-done.
  *
  * Preferences are per-device (a phone and a desktop want different sizes), so
  * they live in localStorage and are applied to <html> by the inline script in
@@ -18,10 +19,12 @@ const WIDTHS = ["34rem", "40rem", "48rem"];
  */
 export function ReaderControls({
   itemId,
+  title,
   initialProgress,
   archived,
 }: {
   itemId: string;
+  title: string;
   initialProgress: number;
   archived: boolean;
 }) {
@@ -62,6 +65,8 @@ export function ReaderControls({
           <DisplayPanel onClose={() => setOpen(false)} toggleRef={toggleRef} />
         )}
       </div>
+
+      <CopyArticle title={title} />
 
       <button
         type="button"

@@ -63,6 +63,7 @@ export default async function ReadPage(props: PageProps<"/read/[id]">) {
             </a>
             <ReaderControls
               itemId={item.id}
+              title={item.title}
               initialProgress={item.progress}
               archived={item.status === "archived"}
             />

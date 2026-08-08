@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { countByStatus } from "@/lib/items";
+import { countDiscover } from "@/lib/recommendations";
 import { AppShell } from "@/components/AppShell";
 import { SemanticGraph } from "@/components/SemanticGraph";
 
@@ -10,14 +11,17 @@ export default async function GraphPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
 
-  const counts = await countByStatus(session.user.id);
+  const [counts, discoverCount] = await Promise.all([
+    countByStatus(session.user.id),
+    countDiscover(session.user.id),
+  ]);
 
   // The graph is deliberately fetched client-side rather than rendered here.
   // It depends on controls that live in the client (k, archived), so building
   // it server-side would only be thrown away on the first interaction — and
   // the page becomes interactive while the layout is still settling.
   return (
-    <AppShell active="graph" counts={counts} wide>
+    <AppShell active="graph" counts={counts} discoverCount={discoverCount} wide>
       <div className="px-3 pt-4 sm:px-4">
         <h1 className="text-lg font-semibold" style={{ color: "var(--text)" }}>
           How your library connects

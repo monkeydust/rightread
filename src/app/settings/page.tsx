@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
 import { TokenManager } from "@/components/TokenManager";
 import { SourceManager } from "@/components/SourceManager";
+import { KeyPhraseManager } from "@/components/KeyPhraseManager";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Settings — rightread" };
@@ -34,6 +35,18 @@ export default async function SettingsPage() {
     })
   ).map(({ _count, ...s }) => ({ ...s, candidateCount: _count.candidates }));
 
+  const phrases = await prisma.keyPhrase.findMany({
+    where: { userId: session.user.id },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      text: true,
+      active: true,
+      embeddedAt: true,
+      lastMatchedAt: true,
+    },
+  });
+
   return (
     <div className="mx-auto min-h-dvh max-w-2xl px-4 py-6">
       <Link
@@ -51,6 +64,10 @@ export default async function SettingsPage() {
 
       <div className="mt-8">
         <SourceManager sources={sources} />
+      </div>
+
+      <div className="mt-10">
+        <KeyPhraseManager phrases={phrases} />
       </div>
 
       <div className="mt-10">

@@ -39,6 +39,11 @@ services:
       # query-to-document. This one is document-to-document.
       - GRAPH_EDGE_FLOOR=${GRAPH_EDGE_FLOOR:-0.15}
       - GRAPH_MAX_NODES=${GRAPH_MAX_NODES:-2000}
+      # Key-phrase floor. A phrase is short, so this is query-to-document and
+      # is NOT interchangeable with either floor above. Measured at 0.32; see
+      # lib/phrases/match.ts for the numbers it came from.
+      - RIGHTREAD_PHRASE_FLOOR=${RIGHTREAD_PHRASE_FLOOR:-0.32}
+      - RIGHTREAD_REC_FLOOR=${RIGHTREAD_REC_FLOOR:-0.45}
     volumes:
       - sqlite_data:/app/data
 

@@ -31,6 +31,9 @@ adjustable size and width, light/sepia/dark, and it remembers where you stopped.
 **Prioritise.** One ordered queue with move up/down, a star for things that
 matter, and an archive for things you've finished.
 
+**Bring things to you.** Add sites to watch and topics you care about, and
+matching articles collect under Discover — see [Discover](#discover).
+
 **Search two ways.** Keyword search over the full text, and semantic search
 that finds pages about what you asked even when they never use your words.
 Results stay in separate labelled groups — see [Search](#search).
@@ -71,6 +74,8 @@ the server console** — copy it from there.
 | `OPENROUTER_SEMANTIC_FLOOR` | Similarity cut-off, 0–1. Defaults to `0.22` (measured — see [Search](#search)). |
 | `GRAPH_EDGE_FLOOR` | Graph noise guard, 0–1. Defaults to `0.15`. Document-to-document, so **not** the same quantity as the two floors above. |
 | `GRAPH_MAX_NODES` | Cap on graph size. Defaults to `2000`; anything omitted is reported in the UI. |
+| `RIGHTREAD_PHRASE_FLOOR` | Key-phrase cut-off, 0–1. Defaults to `0.32` (measured — see [Discover](#discover)). |
+| `RIGHTREAD_REC_FLOOR` | Article-to-article cut-off for recommendations. Defaults to `0.45`. |
 
 > Any variable the app reads at runtime needs an explicit entry under
 > `environment:` in `docker-compose.yml`. `--env-file` only makes it available
@@ -252,6 +257,79 @@ would make React the bottleneck and the settle would visibly stutter.
 Cost at 207 nodes: 21,321 pairs scored in **44 ms**, giving 709 edges at 3.3%
 density with no isolated nodes.
 
+## Discover
+
+Everything else in rightread is reactive — it needs an article in hand before it
+can tell you anything. Discover is the opposite: declare an interest once and it
+brings things to you.
+
+**Listeners** are sites you add in Settings. Paste `lobste.rs`, not a feed URL —
+the app reads the page's `<link rel="alternate">` and falls back to `/feed`,
+`/rss`, `/index.xml` and friends. Every 15 minutes each one is polled, new
+entries are full-text extracted and embedded, and old ones pruned. Resolution
+happens *before* the source row is created, so a site with no feed never becomes
+a broken entry you have to delete.
+
+**Key phrases** are standing semantic queries. Each is embedded once and scored
+against everything the listeners bring in, by meaning rather than keyword — so
+"running models on your own hardware" finds an article that never uses those
+words. Each phrase keeps its own results, so every recommendation can say which
+phrase produced it, and a noisy phrase can be deleted on its own.
+
+**Saving an article** also matches it against the pool, filed under "because you
+saved X". That costs no API call: the item's vector already exists.
+
+### The floor was measured, not chosen
+
+A phrase is short, so phrase → article is the **query-to-document** distribution,
+not the document-to-document one recommendations use. There are now three floors
+in this codebase and they are not interchangeable:
+
+| Comparison | Floor | Why |
+|---|---|---|
+| query → document (search) | 0.22 | favours recall; you typed the query, you can judge |
+| **phrase → document** | **0.32** | favours precision; nobody asked for this result |
+| document → document | 0.45 | two long texts share prose vocabulary, so scores run hot |
+
+0.32 came from scoring eight phrases against a real 202-article pool — four
+on-topic, four deliberate controls:
+
+| phrase | best match | found |
+|---|---|---|
+| retro computing / vintage OSes | 0.534 | homebrew Am29000 windowed OS ✓ |
+| LLMs on your own hardware | 0.506 | running Kimi and GLM at scale ✓ |
+| post-quantum cryptography | 0.388 | LLMs won't break symmetric crypto ✓ |
+| SQLite internals | 0.349 | rebuilding Postgres for analytics ✓ |
+| *Italian pasta recipes* | *0.338* | *a real food article in the pool* |
+| beekeeping for beginners | 0.256 | a botany reading list |
+| baroque church organ | 0.251 | "Altar II" — matched on *altar* |
+| premier league transfers | 0.223 | nothing |
+
+The controls are the interesting part: three of four found weak but genuine
+associations rather than nonsense, and the highest-scoring "control" hit was
+*correct*. So the separation is strong-signal vs weak-signal, not signal vs
+noise — which is exactly why the floor sits where it does.
+
+### Details that matter
+
+**Dismissal is per article, not per recommendation.** "Not interested" holds
+however the piece is found next; otherwise a second phrase would resurface it an
+hour later.
+
+**An article matched by several origins appears once**, under its strongest, so
+the count in the tab is not a lie.
+
+**Sweeps are idempotent.** `Recommendation` is keyed on
+`(user, candidate, originKind, originId)` — two plain columns rather than
+nullable foreign keys, because SQLite treats NULLs as distinct in a unique index
+and a nullable key therefore cannot prevent a duplicate.
+
+**Phrases carry a watermark**, so a poll costs what arrived rather than the whole
+pool; editing a phrase clears it and backfills against everything already held.
+
+**An empty Discover distinguishes three cases** — no sources, no phrases, or
+nothing close enough. The third is a real answer, not a fault.
+
 ## How it works
 
 | Area | Where |
@@ -311,7 +389,7 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for the full procedure.
 ```bash
 npm run dev          # dev server
 npm run build        # production build
-npm test             # sanitize, url, tidy, classify, search, graph, env and db-merge suites
+npm test             # sanitize, url, tidy, classify, search, graph, phrases, feeds, env, db-merge
 npm run lint
 npm run db:backup    # timestamped, keeps the last 20
 npm run db:merge     # additive merge between two databases
