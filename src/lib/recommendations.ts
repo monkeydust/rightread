@@ -33,6 +33,13 @@ export type DiscoverGroup = {
   hits: DiscoverHit[];
 };
 
+export type NearMiss = {
+  phrase: string;
+  /** Best few that did not clear the floor, strongest first. */
+  closest: Array<{ title: string; url: string; score: number }>;
+  floor: number;
+};
+
 export type DiscoverPayload = {
   groups: DiscoverGroup[];
   /** Undismissed, unsaved recommendations — what the tab badge counts. */
@@ -40,6 +47,15 @@ export type DiscoverPayload = {
   /** True when the user has not defined any phrase yet: a different empty state. */
   hasPhrases: boolean;
   hasSources: boolean;
+  /**
+   * For phrases that matched nothing, what came closest.
+   *
+   * An empty Discover is indistinguishable from a broken one, and the honest
+   * answer — "it ran, and nothing was close enough" — is invisible without
+   * this. Showing the near misses with their scores also lets the reader judge
+   * whether the bar is set where they want it, rather than taking it on faith.
+   */
+  nearMisses: NearMiss[];
 };
 
 const MAX_GROUPS = 20;
@@ -137,12 +153,67 @@ export async function getDiscover(userId: string): Promise<DiscoverPayload> {
     return (b.hits[0]?.score ?? 0) - (a.hits[0]?.score ?? 0);
   });
 
+  const matched = new Set(
+    groups.filter((g) => g.kind === "phrase").map((g) => g.key.slice("phrase:".length))
+  );
+  const nearMisses = await computeNearMisses(
+    userId,
+    phrases.filter((p) => p.active && !matched.has(p.id))
+  );
+
   return {
     groups: groups.slice(0, MAX_GROUPS),
     total: seen.size,
     hasPhrases: phrases.some((p) => p.active),
     hasSources: sourceCount > 0,
+    nearMisses,
   };
+}
+
+/** How many near misses to show per phrase. Enough to judge, few enough to skim. */
+const NEAR_MISS_COUNT = 3;
+
+/**
+ * Scores phrases that found nothing, purely to report what came closest.
+ *
+ * This deliberately repeats the work the sweep already did rather than storing
+ * sub-floor scores: a near miss is worth nothing once anything clears the bar,
+ * and persisting every rejected pair would mean writing hundreds of rows per
+ * phrase per poll to display three of them.
+ */
+async function computeNearMisses(
+  userId: string,
+  phrases: Array<{ id: string; text: string }>
+): Promise<NearMiss[]> {
+  if (phrases.length === 0) return [];
+
+  const { fromBlob, cosine } = await import("@/lib/search/embed");
+  const { PHRASE_FLOOR } = await import("@/lib/phrases/match");
+
+  const [withVectors, candidates] = await Promise.all([
+    prisma.keyPhrase.findMany({
+      where: { id: { in: phrases.map((p) => p.id) }, embedding: { not: null } },
+      select: { id: true, text: true, embedding: true },
+    }),
+    prisma.candidate.findMany({
+      where: { userId, embedding: { not: null }, dismissedAt: null, savedItemId: null },
+      select: { title: true, url: true, embedding: true },
+    }),
+  ]);
+  if (candidates.length === 0) return [];
+
+  return withVectors.map((p) => {
+    const q = fromBlob(p.embedding!);
+    const closest = candidates
+      .map((c) => ({
+        title: c.title,
+        url: c.url,
+        score: cosine(q, fromBlob(c.embedding!)),
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, NEAR_MISS_COUNT);
+    return { phrase: p.text, closest, floor: PHRASE_FLOOR };
+  });
 }
 
 /** Cheap count for the nav badge — no candidate bodies loaded. */

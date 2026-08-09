@@ -3,6 +3,14 @@
  * Merges one rightread database into another. Additive only.
  *
  *   node scripts/db-merge.mjs --from <source.db> --to <target.db> [--dry-run]
+ *                             [--only sources|items]
+ *
+ * --only sources  merges just the feed list and the harvested candidate pool,
+ *                 leaving the reading library untouched. Seeding a server's
+ *                 recommendation pool is a different job from importing
+ *                 someone's saved articles, and conflating them would put
+ *                 whatever happens to be in a dev database into the library.
+ * --only items    the reverse: library and tokens only.
  *
  * Why not copy the file, as uk-property-analyzer does? Because that is a
  * one-way overwrite. It suits a project whose local database is the source of
@@ -35,6 +43,7 @@ function parseArgs() {
     if (a === "--dry-run") args.dryRun = true;
     else if (a === "--from") args.from = argv[++i];
     else if (a === "--to") args.to = argv[++i];
+    else if (a === "--only") args.only = String(argv[++i] ?? "");
     else {
       console.error(`Unknown argument: ${a}`);
       exit(2);
@@ -42,7 +51,8 @@ function parseArgs() {
   }
   if (!args.from || !args.to) {
     console.error(
-      "Usage: node scripts/db-merge.mjs --from <source.db> --to <target.db> [--dry-run]"
+      "Usage: node scripts/db-merge.mjs --from <source.db> --to <target.db> " +
+        "[--dry-run] [--only sources|items]"
     );
     exit(2);
   }
@@ -53,7 +63,7 @@ const columnsOf = (db, table) =>
   db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
 
 function main() {
-  const { from, to, dryRun } = parseArgs();
+  const { from, to, dryRun, only: onlyArg } = parseArgs();
 
   for (const [label, path] of [["source", from], ["target", to]]) {
     if (!existsSync(path)) {
@@ -61,6 +71,14 @@ function main() {
       exit(1);
     }
   }
+
+  const only = onlyArg ?? "";
+  if (only && only !== "sources" && only !== "items") {
+    console.error(`--only takes "sources" or "items", not ${JSON.stringify(only)}`);
+    exit(1);
+  }
+  const doSources = only !== "items";
+  const doItems = only !== "sources";
 
   const src = new DatabaseSync(from, { readOnly: true });
   const dst = new DatabaseSync(to);
@@ -101,7 +119,77 @@ function main() {
     // Deliberately not Session / VerificationToken / Account: those are
     // transient auth state, tied to a domain and regenerated at next sign-in,
     // so carrying them across would be noise at best.
-    for (const table of ["Item", "CaptureToken"]) {
+    // Sources and candidates arrived later than this script did, so an older
+    // backup will not have them. Guarding on the tables rather than assuming
+    // them keeps a merge from a pre-recommendations database working — the
+    // whole point of this script is that nothing is lost, including old copies.
+    const canMergeSources =
+      doSources &&
+      hasTable(src, "Source") && hasTable(dst, "Source") &&
+      hasTable(src, "Candidate") && hasTable(dst, "Candidate");
+
+    // ── Sources: match on (userId, feedUrl), remember how ids translate ─
+    // Candidates carry a sourceId, and ids do not survive across databases any
+    // more than user ids do — importing them unremapped would either violate
+    // the foreign key or attach every article to the wrong feed.
+    const sourceIdMap = new Map();
+    const srcSources = canMergeSources
+      ? src.prepare("SELECT * FROM Source").all()
+      : [];
+    const sourceCols = canMergeSources ? shared(src, dst, "Source") : [];
+    let sourcesInserted = 0;
+
+    for (const source of srcSources) {
+      const mappedUserId = userIdMap.get(source.userId);
+      if (!mappedUserId) continue;
+
+      const existing = dst
+        .prepare("SELECT id FROM Source WHERE userId = ? AND feedUrl = ?")
+        .get(mappedUserId, source.feedUrl);
+
+      if (existing) {
+        sourceIdMap.set(source.id, existing.id);
+        continue;
+      }
+      if (!dryRun) {
+        insertRow(dst, "Source", sourceCols, { ...source, userId: mappedUserId });
+      }
+      sourceIdMap.set(source.id, source.id);
+      sourcesInserted++;
+    }
+    if (canMergeSources) {
+      summary.push(["Source", sourcesInserted, srcSources.length - sourcesInserted]);
+    }
+
+    // ── Candidates: the harvested pool ──────────────────────────────────
+    // Worth carrying because each one cost a fetch, an extraction and an
+    // embedding. A fresh server would otherwise spend days rebuilding a pool
+    // that already exists, and recommendations stay thin until it does.
+    if (canMergeSources) {
+      const cols = shared(src, dst, "Candidate");
+      const rows = src.prepare("SELECT * FROM Candidate").all();
+      let inserted = 0;
+
+      for (const row of rows) {
+        const mappedUserId = userIdMap.get(row.userId);
+        const mappedSourceId = sourceIdMap.get(row.sourceId);
+        if (!mappedUserId || !mappedSourceId) continue;
+
+        // savedItemId points at an Item row id, which means nothing here. It is
+        // reconciled by URL below, after Items have been merged.
+        const candidate = {
+          ...row,
+          userId: mappedUserId,
+          sourceId: mappedSourceId,
+          savedItemId: null,
+        };
+        if (!dryRun) inserted += insertRow(dst, "Candidate", cols, candidate);
+        else inserted++;
+      }
+      summary.push(["Candidate", inserted, rows.length - inserted]);
+    }
+
+    for (const table of doItems ? ["Item", "CaptureToken"] : []) {
       const cols = shared(src, dst, table);
       const rows = src.prepare(`SELECT * FROM ${table}`).all();
       let inserted = 0;
@@ -125,6 +213,34 @@ function main() {
       summary.push([table, inserted, rows.length - inserted]);
     }
 
+    // ── Reconcile savedItemId ───────────────────────────────────────────
+    // A candidate the user already saved must not come back as a
+    // recommendation. Matched on URL, which is the only identity that survives
+    // a database boundary — the same key similar.ts uses at query time.
+    if (!dryRun && canMergeSources) {
+      // Runs regardless of --only: the target's own items are what matter here,
+      // not whether this run imported any.
+      const linked = dst.prepare(
+        `UPDATE Candidate SET savedItemId = (
+           SELECT Item.id FROM Item
+            WHERE Item.userId = Candidate.userId
+              AND (Item.url = Candidate.url
+                OR (Candidate.resolvedUrl IS NOT NULL AND Item.url = Candidate.resolvedUrl)
+                OR (Item.resolvedUrl IS NOT NULL AND Item.resolvedUrl = Candidate.url))
+            LIMIT 1)
+          WHERE savedItemId IS NULL
+            AND EXISTS (
+              SELECT 1 FROM Item
+               WHERE Item.userId = Candidate.userId
+                 AND (Item.url = Candidate.url
+                   OR (Candidate.resolvedUrl IS NOT NULL AND Item.url = Candidate.resolvedUrl)
+                   OR (Item.resolvedUrl IS NOT NULL AND Item.resolvedUrl = Candidate.url)))`
+      ).run();
+      if (Number(linked.changes) > 0) {
+        summary.push(["  (linked to saved)", Number(linked.changes), 0]);
+      }
+    }
+
     if (dryRun) {
       dst.exec("ROLLBACK");
     } else {
@@ -145,7 +261,7 @@ function main() {
   }
   console.log(
     `\n  Totals on target: ` +
-      ["User", "Item", "CaptureToken"]
+      ["User", "Item", "CaptureToken", ...(hasTable(dst, "Source") ? ["Source", "Candidate"] : [])]
         .map((t) => `${t} ${dst.prepare(`SELECT count(*) c FROM ${t}`).get().c}`)
         .join(", ")
   );
@@ -153,6 +269,15 @@ function main() {
 
   src.close();
   dst.close();
+}
+
+/** True when a table exists — older databases predate the newer features. */
+function hasTable(db, table) {
+  return Boolean(
+    db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?")
+      .get(table)
+  );
 }
 
 /** Columns present in both schemas; target-only columns fall back to defaults. */

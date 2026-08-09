@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { hostLabel } from "@/lib/url";
-import type { DiscoverPayload, DiscoverHit } from "@/lib/recommendations";
+import type { DiscoverPayload, DiscoverHit, NearMiss } from "@/lib/recommendations";
 
 /**
  * Optimistic removal. Saving or dismissing should feel instant — the row is
@@ -120,6 +120,58 @@ function Hit({
   );
 }
 
+/**
+ * What a phrase nearly matched.
+ *
+ * Without this, "nothing matched" and "something is broken" look identical,
+ * and there is no way to tell whether the bar is set where you want it. The
+ * scores are shown because the number is the whole point: 26% against a 32%
+ * bar is a system working, not a system failing.
+ */
+function NearMisses({ misses }: { misses: NearMiss[] }) {
+  const withAny = misses.filter((m) => m.closest.length > 0);
+  if (withAny.length === 0) return null;
+
+  return (
+    <div className="mt-8">
+      {withAny.map((m) => (
+        <section key={m.phrase} className="mt-5 first:mt-0">
+          <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>
+            Nothing matched <strong style={{ color: "var(--text)" }}>{m.phrase}</strong>{" "}
+            — the bar is {Math.round(m.floor * 100)}%. Closest so far:
+          </p>
+          <ul className="mt-1.5">
+            {m.closest.map((c) => (
+              <li key={c.url} className="flex items-baseline gap-2 py-0.5">
+                <span
+                  className="w-9 shrink-0 text-right text-[12px] tabular-nums"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  {Math.round(c.score * 100)}%
+                </span>
+                <a
+                  href={c.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="min-w-0 text-[13px] hover:underline"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  {c.title}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+      <p className="mt-4 text-[12px]" style={{ color: "var(--text-muted)" }}>
+        Sources are checked every 15 minutes and the pool grows over time, so a
+        phrase can sit quiet for a while and then start matching. More listeners
+        widen the net.
+      </p>
+    </div>
+  );
+}
+
 export function DiscoverFeed({ data }: { data: DiscoverPayload }) {
   const { resolved, mark, unmark } = useResolved();
 
@@ -160,16 +212,12 @@ export function DiscoverFeed({ data }: { data: DiscoverPayload }) {
             </p>
           </>
         ) : (
-          <>
-            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-              Nothing has matched yet.
+          <div className="mx-auto max-w-xl text-left">
+            <p className="text-center text-sm" style={{ color: "var(--text-muted)" }}>
+              Nothing has matched yet — which is an answer, not a fault.
             </p>
-            <p className="mt-2 text-[13px]" style={{ color: "var(--text-muted)" }}>
-              Your sources are checked every 15 minutes. An empty list means
-              nothing published recently was close enough — which is the honest
-              answer, not a fault.
-            </p>
-          </>
+            <NearMisses misses={data.nearMisses} />
+          </div>
         )}
       </div>
     );
@@ -211,6 +259,8 @@ export function DiscoverFeed({ data }: { data: DiscoverPayload }) {
           </ul>
         </section>
       ))}
+
+      <NearMisses misses={data.nearMisses} />
     </div>
   );
 }
