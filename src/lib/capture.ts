@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { normalizeUrl, hostLabel } from "@/lib/url";
-import { extractArticle } from "@/lib/extract";
+import { extractArticle, extractFromHtml, type Extracted } from "@/lib/extract";
 import { classifyPage, type PageEvidence } from "@/lib/classify";
 import { publish } from "@/lib/events";
 import { embed, embeddableText, toBlob, EMBED_MODEL } from "@/lib/search/embed";
@@ -80,47 +80,7 @@ export async function runExtraction(itemId: string, url: string): Promise<void> 
 
   try {
     const article = await extractArticle(url);
-    await prisma.item.update({
-      where: { id: itemId },
-      data: {
-        title: article.title,
-        siteName: article.siteName,
-        byline: article.byline,
-        excerpt: article.excerpt,
-        leadImage: article.leadImage,
-        contentHtml: article.contentHtml,
-        textContent: article.textContent,
-        wordCount: article.wordCount,
-        resolvedUrl: article.resolvedUrl,
-        extractStatus: "ok",
-        extractError: null,
-        extractedAt: new Date(),
-      },
-    });
-
-    notify("extracted");
-
-    await classifyItem(itemId, {
-      url: article.resolvedUrl,
-      title: article.title,
-      text: article.textContent,
-      byline: article.byline,
-      siteName: article.siteName,
-      wordCount: article.wordCount,
-      extracted: true,
-    });
-    notify("classified");
-
-    await embedItem(itemId, article);
-
-    // Now that the item has a vector, see what the listeners already hold that
-    // resembles it. Costs no API call — both sides are already embedded — and
-    // is fail-soft inside, so a recommendation that cannot be written never
-    // affects the capture that triggered it.
-    if (owner?.userId) {
-      const { recommendForItem } = await import("@/lib/phrases/match");
-      await recommendForItem(owner.userId, itemId);
-    }
+    await persistArticle(itemId, article, owner?.userId, notify);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[rightread] extraction failed for ${url}: ${message}`);
@@ -166,6 +126,110 @@ export async function runExtraction(itemId: string, url: string): Promise<void> 
     });
     notify("classified");
   }
+}
+
+/**
+ * Persists an extracted article and runs the rest of the pipeline —
+ * classification, embedding, recommendations. Shared by the fetch path
+ * (runExtraction) and the paste path (applyProvidedContent) so both produce an
+ * identical item: same fields, same classification, same place in Discover.
+ */
+async function persistArticle(
+  itemId: string,
+  article: Extracted,
+  userId: string | undefined,
+  notify: (cause: "extracted" | "classified") => void
+): Promise<void> {
+  await prisma.item.update({
+    where: { id: itemId },
+    data: {
+      title: article.title,
+      siteName: article.siteName,
+      byline: article.byline,
+      excerpt: article.excerpt,
+      leadImage: article.leadImage,
+      contentHtml: article.contentHtml,
+      textContent: article.textContent,
+      wordCount: article.wordCount,
+      resolvedUrl: article.resolvedUrl,
+      extractStatus: "ok",
+      extractError: null,
+      extractedAt: new Date(),
+    },
+  });
+  notify("extracted");
+
+  await classifyItem(itemId, {
+    url: article.resolvedUrl,
+    title: article.title,
+    text: article.textContent,
+    byline: article.byline,
+    siteName: article.siteName,
+    wordCount: article.wordCount,
+    extracted: true,
+  });
+  notify("classified");
+
+  await embedItem(itemId, article);
+
+  // Now that the item has a vector, see what the listeners already hold that
+  // resembles it. Costs no API call — both sides are already embedded — and is
+  // fail-soft inside, so a recommendation that cannot be written never affects
+  // the capture that triggered it.
+  if (userId) {
+    const { recommendForItem } = await import("@/lib/phrases/match");
+    await recommendForItem(userId, itemId);
+  }
+}
+
+/**
+ * The browser-sourced path: extract from HTML the user's own browser supplied,
+ * rather than from a server fetch.
+ *
+ * This exists for pages a server cannot reach but a person can — a paywalled
+ * article they are logged into, or one behind a bot check they passed in their
+ * own session. The server never touches the origin; it runs the same Readability
+ * and the same sanitize gate on HTML it is handed. Because the reader renders
+ * the result with dangerouslySetInnerHTML, that sanitize step is not optional
+ * and is exactly the one the fetch path already relies on.
+ *
+ * Throws with a human-readable message when the HTML yields no article, so the
+ * caller can tell the user their selection did not contain a readable page.
+ */
+export async function applyProvidedContent(
+  itemId: string,
+  html: string
+): Promise<void> {
+  const item = await prisma.item.findUnique({
+    where: { id: itemId },
+    select: { userId: true, url: true, resolvedUrl: true },
+  });
+  if (!item) throw new Error("Item not found");
+
+  // Base the extraction on the article's own URL, so relative links resolve and
+  // classification sees the real source — not the archive or reader wrapper the
+  // HTML may have come through.
+  const sourceUrl = item.resolvedUrl ?? item.url;
+  const article = extractFromHtml(html, sourceUrl);
+
+  // A pasted selection often has no <title> of its own, in which case
+  // extraction falls back to the hostname. Keep whatever title the item already
+  // had — captured from the original save — rather than replacing a real title
+  // with "archive.is".
+  if (article.title === new URL(sourceUrl).hostname) {
+    const existing = await prisma.item.findUnique({
+      where: { id: itemId },
+      select: { title: true },
+    });
+    if (existing?.title && existing.title !== "Untitled") {
+      article.title = existing.title;
+    }
+  }
+
+  const notify = (cause: "extracted" | "classified") =>
+    publish(item.userId, { type: "items-changed", cause, itemId });
+
+  await persistArticle(itemId, article, item.userId, notify);
 }
 
 /**

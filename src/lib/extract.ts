@@ -208,6 +208,25 @@ function firstImage(doc: Document, baseUrl: string): string | null {
  */
 export async function extractArticle(url: string): Promise<Extracted> {
   const { html, finalUrl } = await fetchArticle(url);
+  return extractFromHtml(html, finalUrl);
+}
+
+/**
+ * Turns already-obtained HTML into clean reader content — the whole pipeline
+ * after the fetch, so a fetch and a paste share one code path and one set of
+ * guarantees.
+ *
+ * This is what makes the browser-sourced route safe: HTML pasted from the
+ * user's own browser is arbitrary web content, exactly like HTML the server
+ * fetched, and it passes through the identical sanitize gate (sanitizeArticleHtml)
+ * before it is ever stored or rendered. The trust boundary does not move.
+ *
+ * `sourceUrl` is the page the HTML came from, used to resolve relative links
+ * and as the base for og: lookups. For a paste it is the original article URL,
+ * not the archive wrapper.
+ */
+export function extractFromHtml(html: string, sourceUrl: string): Extracted {
+  const finalUrl = sourceUrl;
 
   // jsdom logs every CSS parse error on a real-world page otherwise.
   const virtualConsole = new VirtualConsole();
@@ -243,6 +262,9 @@ export async function extractArticle(url: string): Promise<Extracted> {
   const title =
     article.title?.trim() ||
     doc.querySelector("title")?.textContent?.trim() ||
+    // A pasted selection often has no <title>, but its <h1> is a fine last
+    // resort — far better than showing the bare hostname.
+    doc.querySelector("h1")?.textContent?.trim() ||
     new URL(finalUrl).hostname;
 
   const result: Extracted = {

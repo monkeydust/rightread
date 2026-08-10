@@ -6,6 +6,7 @@ import type { ListItem } from "@/lib/items";
 import { hostLabel } from "@/lib/url";
 import { KINDS } from "@/lib/classify/kinds";
 import { ArrowUp, ArrowDown, Star, Check, Undo, Trash } from "@/components/icons";
+import { PasteCapture } from "@/components/PasteCapture";
 
 type Props = {
   item: ListItem;
@@ -82,6 +83,7 @@ export function ItemRow({
   onRetry,
 }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [pasting, setPasting] = useState(false);
 
   const minutes = Math.max(1, Math.round((item.wordCount ?? 0) / 200));
   const extracting = item.extractStatus === "pending";
@@ -247,6 +249,16 @@ export function ItemRow({
               >
                 retry
               </button>
+              <span aria-hidden>·</span>
+              {/* For pages a server can't reach but the user can — paywalled or
+                  bot-checked. They paste the page their browser already loaded. */}
+              <button
+                type="button"
+                onClick={() => setPasting(true)}
+                className="underline hover:no-underline"
+              >
+                paste page
+              </button>
             </>
           )}
         </div>
@@ -289,6 +301,14 @@ export function ItemRow({
           </IconButton>
         )}
       </div>
+
+      {pasting && (
+        <PasteCapture
+          itemId={item.id}
+          title={item.title}
+          onClose={() => setPasting(false)}
+        />
+      )}
     </li>
   );
 }
