@@ -106,3 +106,58 @@ export function hostLabel(url: string): string {
     return url;
   }
 }
+
+/**
+ * What the user meant by what they typed into the combined search/save box.
+ *
+ * Pure and separate from the component so the rule is testable, because this
+ * one decision is the whole feature: get it wrong and searching quietly saves
+ * a page, or pasting a link searches for it.
+ *
+ * A value counts as a link only when the WHOLE trimmed value is a single
+ * token that parses. That is what keeps "rust async" a search while
+ * "danluu.com" is a link — extractFirstUrl already refuses a bare hostname
+ * when there is surrounding text, and requiring one token stops a sentence
+ * that merely mentions a URL from being treated as one.
+ *
+ * A bare token additionally needs a plausible TLD. Without that check a
+ * single-word search — "rust", "sqlite", "data*" — classifies as a link,
+ * because `new URL("https://rust")` is perfectly valid: a single-label host is
+ * legal, it just isn't what anyone typing one word into a search box meant.
+ * Tests caught this, and it is the dangerous direction of the two: reading a
+ * search as a link offers to save a page nobody asked for.
+ *
+ * An explicit scheme bypasses the TLD rule. "http://localhost:3000" and
+ * intranet hostnames are real links, and typing the scheme is a clear enough
+ * statement of intent to be taken at face value.
+ */
+export function classifyInput(value: string): { kind: "empty" } | { kind: "link"; url: string } | { kind: "search"; term: string } {
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) return { kind: "empty" };
+
+  if (!/\s/.test(trimmed)) {
+    const explicitScheme = /^https?:\/\//i.test(trimmed);
+    const url = extractFirstUrl(trimmed);
+    if (url && (explicitScheme || hasPlausibleTld(url))) {
+      return { kind: "link", url };
+    }
+  }
+  return { kind: "search", term: trimmed };
+}
+
+/**
+ * Does this URL's host look like a public domain rather than a stray word?
+ * At least two labels, and a final label that is alphabetic and 2+ characters
+ * — which "example.com" and "bbc.co.uk" satisfy and "rust" and "e.g" do not.
+ */
+function hasPlausibleTld(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return false;
+  }
+  const labels = host.split(".").filter(Boolean);
+  if (labels.length < 2) return false;
+  return /^[a-z]{2,}$/i.test(labels[labels.length - 1]);
+}

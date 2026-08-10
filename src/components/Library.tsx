@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ListItem } from "@/lib/items";
 import { ItemRow } from "@/components/ItemRow";
-import { AddLink } from "@/components/AddLink";
+import { OmniBar } from "@/components/OmniBar";
 import { Star } from "@/components/icons";
 import { SearchResults, type SearchPayload } from "@/components/SearchResults";
 
@@ -18,7 +18,9 @@ export function Library({ initialItems, status }: Props) {
   const [items, setItems] = useState(initialItems);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  // Set by OmniBar, which decides whether what was typed is a search or a
+  // link. Empty whenever the box is holding a link.
+  const [searchTerm, setSearchTerm] = useState("");
   const [starredOnly, setStarredOnly] = useState(false);
   // Results carry the term they belong to. That makes "is this stale?" a
   // derived question rather than something to clear imperatively — clearing
@@ -128,8 +130,6 @@ export function Library({ initialItems, status }: Props) {
     [items]
   );
 
-  const searchTerm = query.trim();
-
   const current = results?.term === searchTerm ? results.payload : null;
   const searching = searchTerm !== "" && current === null;
 
@@ -177,34 +177,23 @@ export function Library({ initialItems, status }: Props) {
 
   return (
     <div>
-      {status === "unread" && <AddLink onSaved={refresh} />}
+      <OmniBar onSaved={refresh} onSearchTermChange={setSearchTerm} />
 
-      {(items.length > 0 || starredCount > 0) && (
-        <div className="flex gap-2 px-3 pb-2 sm:px-4">
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search everything — words, or use * and &quot;phrases&quot;"
-            aria-label="Search your library by keyword or meaning"
-            className="min-w-0 flex-1 rounded-lg border bg-transparent px-3 py-2 text-sm outline-none"
-            style={{ borderColor: "var(--border)" }}
-          />
-          {starredCount > 0 && (
-            <button
-              type="button"
-              onClick={() => setStarredOnly((v) => !v)}
-              aria-pressed={starredOnly}
-              className="flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors"
-              style={{
-                borderColor: starredOnly ? "var(--accent)" : "var(--border)",
-                color: starredOnly ? "var(--accent)" : "var(--text-muted)",
-              }}
-            >
-              <Star size={15} filled={starredOnly} />
-              {starredCount}
-            </button>
-          )}
+      {starredCount > 0 && (
+        <div className="flex justify-end px-3 pb-2 sm:px-4">
+          <button
+            type="button"
+            onClick={() => setStarredOnly((v) => !v)}
+            aria-pressed={starredOnly}
+            className="flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors"
+            style={{
+              borderColor: starredOnly ? "var(--accent)" : "var(--border)",
+              color: starredOnly ? "var(--accent)" : "var(--text-muted)",
+            }}
+          >
+            <Star size={15} filled={starredOnly} />
+            {starredCount}
+          </button>
         </div>
       )}
 
@@ -225,7 +214,7 @@ export function Library({ initialItems, status }: Props) {
             ? "Nothing starred yet."
             : status === "archived"
               ? "Nothing archived yet."
-              : "Nothing saved yet. Share a link here, or paste one above."}
+              : "Nothing saved yet. Paste a link in the box above, or share one to rightread."}
         </p>
       ) : (
         <ul style={{ borderTop: "1px solid var(--border)" }}>
