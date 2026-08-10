@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { normalizeUrl, hostLabel } from "@/lib/url";
 import { extractArticle, extractFromHtml, type Extracted } from "@/lib/extract";
+import { youtubeVideoId, extractYouTube } from "@/lib/extract-video";
 import { classifyPage, type PageEvidence } from "@/lib/classify";
 import { publish } from "@/lib/events";
 import { embed, embeddableText, toBlob, EMBED_MODEL } from "@/lib/search/embed";
@@ -79,7 +80,14 @@ export async function runExtraction(itemId: string, url: string): Promise<void> 
   };
 
   try {
-    const article = await extractArticle(url);
+    // A YouTube watch page is a JavaScript shell — Readability finds nothing,
+    // and used to store "No readable article found". Build a video card from
+    // YouTube's own metadata instead; anything on YouTube that is not a video
+    // page (a channel, a playlist) returns null here and takes the normal path.
+    const videoId = youtubeVideoId(url);
+    const article = videoId
+      ? await extractYouTube(url, videoId)
+      : await extractArticle(url);
     await persistArticle(itemId, article, owner?.userId, notify);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
