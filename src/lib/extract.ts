@@ -228,11 +228,34 @@ export async function extractArticle(url: string): Promise<Extracted> {
 export function extractFromHtml(html: string, sourceUrl: string): Extracted {
   const finalUrl = sourceUrl;
 
+  // Remove <style> blocks before jsdom ever sees them.
+  //
+  // jsdom's CSS engine throws on some real-world stylesheets — a modern page's
+  // `border: var(--border-width, 1px)` and the like have crashed extraction
+  // deep inside cssstyle with "Cannot create property 'border-width' on
+  // string". We discard all page CSS anyway: Readability works on structure and
+  // text, and the sanitizer strips styles. So the stylesheet is pure liability,
+  // and removing it is provably lossless — verified byte-identical extraction
+  // with and without. Only literal <style> elements match; escaped `&lt;style&gt;`
+  // in a code sample does not, so article text is never touched.
+  const cleaned = html.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
+
   // jsdom logs every CSS parse error on a real-world page otherwise.
   const virtualConsole = new VirtualConsole();
   virtualConsole.on("jsdomError", () => {});
 
-  const dom = new JSDOM(html, { url: finalUrl, virtualConsole });
+  let dom: JSDOM;
+  try {
+    dom = new JSDOM(cleaned, { url: finalUrl, virtualConsole });
+  } catch (err) {
+    // A page whose markup jsdom cannot parse at all. Better a clean, storable
+    // message than an opaque internal stack surfaced to the user as its error.
+    throw new Error(
+      `This page's markup couldn't be parsed (${
+        err instanceof Error ? err.message.slice(0, 80) : "unknown"
+      })`
+    );
+  }
   const doc = dom.window.document;
 
   const siteName =
@@ -241,10 +264,23 @@ export function extractFromHtml(html: string, sourceUrl: string): Extracted {
   const leadImage = firstImage(doc, finalUrl);
 
   const readerable = isProbablyReaderable(doc);
-  // Readability mutates the document, so clone before parsing.
-  const article = new Readability(doc.cloneNode(true) as Document, {
-    charThreshold: readerable ? 500 : 100,
-  }).parse();
+  // Readability mutates the document, so clone before parsing. Guarded because
+  // it too can throw from deep in jsdom on pathological markup — the same class
+  // of failure the <style> strip above addresses, caught here so it degrades to
+  // "couldn't extract" rather than an uncaught crash on the caller.
+  let article: ReturnType<Readability["parse"]>;
+  try {
+    article = new Readability(doc.cloneNode(true) as Document, {
+      charThreshold: readerable ? 500 : 100,
+    }).parse();
+  } catch (err) {
+    dom.window.close();
+    throw new Error(
+      `This page couldn't be turned into an article (${
+        err instanceof Error ? err.message.slice(0, 80) : "unknown"
+      })`
+    );
+  }
 
   if (!article?.content) {
     dom.window.close();
