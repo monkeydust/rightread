@@ -16,8 +16,13 @@ function messageFor(code: string | undefined): string | null {
       return "That address isn't on the allow list for this rightread.";
     case "Verification":
       return "That sign-in link has expired or was already used. Request a new one.";
+    // Auth.js collapses every non-client-safe failure into this one code, so
+    // the copy cannot be specific. In practice the overwhelmingly likely cause
+    // is the sending of the mail itself failing — which looks identical to a
+    // rejected address from the outside, so the message has to say plainly
+    // that the address is not the problem.
     case "Configuration":
-      return "Sign-in is misconfigured on the server. Check the server logs.";
+      return "We couldn't send the sign-in email — most likely a problem with the mail service, not with your address. The server logs have the detail.";
     default:
       return "Something went wrong signing in. Try again.";
   }
