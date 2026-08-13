@@ -146,13 +146,49 @@ export function Library({ initialItems, status }: Props) {
     if (!searchTerm) return;
     const controller = new AbortController();
     const timer = setTimeout(async () => {
+      const q = encodeURIComponent(searchTerm);
       try {
-        const res = await fetch(
-          `/api/search?q=${encodeURIComponent(searchTerm)}`,
+        // Two stages, not one payload: keyword results are ~ms of SQLite and
+        // render the moment they land, while the semantic group — which waits
+        // on an embedding round trip — fills in afterwards. Bundling them
+        // meant the fast half arrived at the speed of the slow half.
+        const res = await fetch(`/api/search?q=${q}&mode=exact`, {
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error("search failed");
+        const exactPayload = await res.json();
+        setResults({
+          term: searchTerm,
+          payload: { ...exactPayload, semantic: [], semanticStatus: "pending" },
+        });
+
+        // Sequential on purpose: the exclude list needs the keyword ids, and
+        // this request's time is dominated by the embedding call — starting it
+        // ~20ms later is invisible, keeping the dedupe exact is not.
+        const exclude = exactPayload.exact
+          .map((h: { id: string }) => h.id)
+          .join(",");
+        const semRes = await fetch(
+          `/api/search?q=${q}&mode=semantic&exclude=${exclude}`,
           { signal: controller.signal }
         );
-        if (!res.ok) throw new Error("search failed");
-        setResults({ term: searchTerm, payload: await res.json() });
+        const sem = semRes.ok
+          ? await semRes.json()
+          : { semantic: [], semanticStatus: "unavailable" };
+        // Functional update guarded by term: if the query changed while the
+        // semantic half was in flight, its results belong to a dead search.
+        setResults((prev) =>
+          prev && prev.term === searchTerm
+            ? {
+                term: searchTerm,
+                payload: {
+                  ...prev.payload,
+                  semantic: sem.semantic,
+                  semanticStatus: sem.semanticStatus,
+                },
+              }
+            : prev
+        );
       } catch (err) {
         // An abort is the expected outcome of typing another character.
         if ((err as Error)?.name !== "AbortError") setError("Search failed");

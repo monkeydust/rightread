@@ -21,7 +21,8 @@ export type SearchPayload = {
   hasWildcard: boolean;
   exact: SearchHit[];
   semantic: SearchHit[];
-  semanticStatus: "ok" | "unavailable" | "not-indexed" | "skipped";
+  /** "pending" is client-side only: the semantic request is still in flight. */
+  semanticStatus: "ok" | "unavailable" | "not-indexed" | "skipped" | "pending";
   tookMs: number;
 };
 
@@ -157,7 +158,10 @@ export function SearchResults({
   }
 
   const { exact, semantic, semanticStatus } = results;
-  const nothing = exact.length === 0 && semantic.length === 0;
+  const pending = semanticStatus === "pending";
+  // "Nothing by meaning" is not a claim we can make while the semantic request
+  // is still in flight — hold the verdict until it lands.
+  const nothing = exact.length === 0 && semantic.length === 0 && !pending;
 
   return (
     <div style={{ opacity: loading ? 0.6 : 1, transition: "opacity 120ms" }}>
@@ -167,6 +171,15 @@ export function SearchResults({
           style={{ color: "var(--text-muted)" }}
         >
           Nothing matches <strong>{results.query}</strong> — by words or by meaning.
+        </p>
+      )}
+
+      {exact.length === 0 && pending && (
+        <p
+          className="px-4 py-12 text-center text-sm"
+          style={{ color: "var(--text-muted)" }}
+        >
+          No exact matches — looking for related pages…
         </p>
       )}
 
@@ -204,8 +217,19 @@ export function SearchResults({
         </>
       )}
 
+      {/* The keyword group is already on screen; say the second group is coming. */}
+      {exact.length > 0 && pending && (
+        <p
+          className="px-4 py-3 text-[12px]"
+          style={{ color: "var(--text-muted)" }}
+          aria-live="polite"
+        >
+          Looking for related pages…
+        </p>
+      )}
+
       {/* Explain an empty semantic section rather than leaving it silent. */}
-      {!nothing && semantic.length === 0 && semanticStatus !== "ok" && (
+      {!nothing && !pending && semantic.length === 0 && semanticStatus !== "ok" && (
         <p
           className="px-4 py-3 text-[12px]"
           style={{ color: "var(--text-muted)" }}

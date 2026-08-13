@@ -30,7 +30,7 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  // tests/ are standalone scripts run by node's type stripping, which requires
-  // explicit .ts import extensions that this config rejects.
-  "exclude": ["node_modules", "extension", "tests"]
+  // tests/ and scripts/ are standalone programs run by node's type stripping,
+  // which requires explicit .ts import extensions that this config rejects.
+  "exclude": ["node_modules", "extension", "tests", "scripts"]
 }
