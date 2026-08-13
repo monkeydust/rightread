@@ -6,6 +6,7 @@ import { ItemRow } from "@/components/ItemRow";
 import { OmniBar } from "@/components/OmniBar";
 import { Star } from "@/components/icons";
 import { SearchResults, type SearchPayload } from "@/components/SearchResults";
+import { useOfflinePrecache } from "@/components/useOfflinePrecache";
 
 type Props = {
   initialItems: ListItem[];
@@ -16,6 +17,14 @@ export function Library({ initialItems, status }: Props) {
   // Callers pass key={status}, so switching tabs remounts this with the right
   // server data rather than syncing props into state.
   const [items, setItems] = useState(initialItems);
+
+  // Only the unread queue — the archive is what you have finished with, and
+  // spending someone's data to pull it down would be backwards.
+  useOfflinePrecache(
+    items.map((item) => item.id),
+    status === "unread"
+  );
+
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Set by OmniBar, which decides whether what was typed is a search or a
