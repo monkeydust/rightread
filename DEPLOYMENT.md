@@ -72,8 +72,21 @@ AUTH_TRUST_HOST=true
 AUTH_RESEND_KEY="<resend key>"
 EMAIL_FROM="rightread <onboarding@resend.dev>"
 DATABASE_URL="file:/app/data/production.db"
+RIGHTREAD_ALLOWED_EMAILS="you@example.com,someone@else.com"
 OPENROUTER_API_KEY="<openrouter key>"
 OPENROUTER_MODEL="openai/gpt-5.6-luna"
+```
+
+`RIGHTREAD_ALLOWED_EMAILS` is the sign-in gate, and it is the one variable that
+**must not** be forgotten here: leave it out and it reaches the container as an
+empty string, which is read as "deny everyone" — the login page will refuse
+every address, including yours, until it is set and the container restarted.
+That is the deliberate direction to fail (a blank gate that admitted everyone
+would be a silent, production-only hole), but it does mean adding or removing a
+person is an edit to this file plus a redeploy. Check it took with:
+
+```bash
+docker-compose --env-file .env.prod exec app printenv RIGHTREAD_ALLOWED_EMAILS
 ```
 
 `OPENROUTER_*` drives page classification (and, later, summaries). If the key is

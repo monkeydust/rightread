@@ -28,6 +28,20 @@ const FIRST_POLL_DELAY_MS = 2 * 60 * 1000;
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
+  // Announce the sign-in allow list at boot. This is the one line that answers
+  // "did the env var actually reach the container?" without a shell on the box
+  // — and if it didn't, nobody can sign in, so it needs to be visible in the
+  // deploy log rather than discovered by a locked-out user.
+  const { allowedEmails } = await import("@/lib/allowlist");
+  const allowed = allowedEmails();
+  if (allowed.length === 0) {
+    console.error(
+      "[auth] allow list is EMPTY — no one can sign in. Set RIGHTREAD_ALLOWED_EMAILS."
+    );
+  } else {
+    console.log(`[auth] allow list: ${allowed.join(", ")} (${allowed.length})`);
+  }
+
   // Imported dynamically so the edge bundle never sees Prisma or jsdom.
   const { refreshAllSources } = await import("@/lib/sources/refresh");
 

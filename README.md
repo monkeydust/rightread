@@ -68,6 +68,7 @@ the server console** — copy it from there.
 | `AUTH_TRUST_HOST` | `true`. Lets the sign-in link follow the host you opened. |
 | `AUTH_RESEND_KEY` | Resend API key. Blank ⇒ link logged to the console. |
 | `EMAIL_FROM` | Sender address for those emails. |
+| `RIGHTREAD_ALLOWED_EMAILS` | Comma-separated list of addresses allowed to sign in. **Blank ⇒ nobody can** — see [Who can sign in](#who-can-sign-in). |
 | `OPENROUTER_API_KEY` | OpenRouter key. Without it classification degrades to `other`; nothing breaks. |
 | `OPENROUTER_MODEL` | Defaults to `openai/gpt-5.6-luna`. One model for all of rightread. |
 | `OPENROUTER_EMBED_MODEL` | Defaults to `openai/text-embedding-3-small`. Changing it invalidates stored vectors — re-run `search:backfill --force`. |
@@ -82,7 +83,32 @@ the server console** — copy it from there.
 > for `${...}` substitution *in that file* — it does **not** pass it into the
 > container. Give each one a `:-` default there too: a variable listed without
 > one, and absent from the env file, arrives as an **empty string** rather than
-> unset, which `??` does not catch.
+> unset, which `??` does not catch. The one deliberate exception is
+> `RIGHTREAD_ALLOWED_EMAILS`, where empty already means the safe thing (deny
+> everyone) and a default would be a hard-coded back door in a tracked file.
+
+### Who can sign in
+
+rightread is multi-user — every row is scoped to a `userId` — but it is not
+open registration. Anyone who can reach the login page can request a magic
+link, so `RIGHTREAD_ALLOWED_EMAILS` decides who actually gets one:
+
+```bash
+RIGHTREAD_ALLOWED_EMAILS="you@example.com,someone@else.com"
+```
+
+Commas, semicolons and whitespace all separate; case and surrounding spaces are
+ignored. The list is checked in the Auth.js `signIn` callback
+(`src/lib/allowlist.ts`), which runs **twice** per sign-in — once before the
+email goes out and once when the link is clicked — so removing an address
+invalidates any link already in that person's inbox. Existing sessions are not
+revoked; delete the user row for that.
+
+**Empty or unset denies everyone, on purpose.** A missing variable that meant
+"let anybody in" would be a silent, production-only hole of exactly the shape
+`src/lib/env.ts` exists to prevent. Locking the door is loud, appears in the
+log, and is undone by setting one variable. Adding a person is that variable
+plus a restart — no migration, and their library starts empty.
 
 ### Signing in from your phone on a LAN
 

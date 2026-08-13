@@ -21,6 +21,11 @@ services:
       - AUTH_TRUST_HOST=true
       - AUTH_RESEND_KEY=${AUTH_RESEND_KEY}
       - EMAIL_FROM=${EMAIL_FROM}
+      # Who may sign in. Deliberately given NO `:-` default: the empty string
+      # this becomes when it is missing from .env.prod is read as "deny
+      # everyone", which is the safe direction to fail and says so in the log.
+      # A default here would be a hard-coded back door in a checked-in file.
+      - RIGHTREAD_ALLOWED_EMAILS=${RIGHTREAD_ALLOWED_EMAILS}
       # Must be listed here, not merely present in .env.prod: --env-file makes
       # a variable available for ${...} substitution in this file, it does NOT
       # pass it into the container. Anything the app reads at runtime needs an
