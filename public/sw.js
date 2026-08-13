@@ -17,7 +17,7 @@
 // Bump on any change to styling or markup: cached article HTML references
 // hashed CSS/font URLs, and stale HTML pointing at deleted chunks renders
 // unstyled. Activation deletes every cache not matching this suffix.
-const VERSION = "v14";
+const VERSION = "v15";
 const SHELL_CACHE = `rr-shell-${VERSION}`;
 const ARTICLE_CACHE = `rr-articles-${VERSION}`;
 const ASSET_CACHE = `rr-assets-${VERSION}`;
@@ -63,6 +63,30 @@ function isArticle(url) {
   return url.pathname.startsWith("/read/");
 }
 
+/**
+ * Whether this is the client router asking for a flight payload.
+ *
+ * Tapping an article in the queue does NOT request a document — next/link
+ * navigates client-side and fetches `/read/<id>?_rsc=<hash>` instead. That
+ * request is not `mode: "navigate"`, so it misses the article handler below
+ * entirely and goes straight to the network. Offline that is a dead end, which
+ * is why a precached document alone still left a tap on the queue failing.
+ */
+function isRscRequest(request, url) {
+  return request.headers.get("RSC") === "1" || url.searchParams.has("_rsc");
+}
+
+/**
+ * Cache key for an article's flight payload.
+ *
+ * The router appends a per-build `_rsc` hash to the URL, so the request URL is
+ * useless as a key — it changes on every deploy and would never hit. Normalise
+ * to the path, and keep it distinct from the document, which has no query.
+ */
+function rscKey(url) {
+  return `${url.pathname}?__rr_rsc=1`;
+}
+
 function isNeverCached(url) {
   return (
     url.pathname.startsWith("/api/") ||
@@ -86,6 +110,40 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
   if (isNeverCached(url)) return;
+
+  // The flight payload for an article, i.e. a tap on the queue. Same
+  // stale-while-revalidate shape as the document below, keyed on the path.
+  if (isArticle(url) && isRscRequest(request, url)) {
+    event.respondWith(
+      (async () => {
+        const key = rscKey(url);
+        const articles = await caches.open(ARTICLE_CACHE);
+        const precache = await caches.open(PRECACHE);
+        const cached = (await articles.match(key)) ?? (await precache.match(key));
+
+        const network = fetch(request)
+          .then((response) => {
+            if (response.ok && response.type === "basic" && !response.redirected) {
+              articles.put(key, response.clone());
+            }
+            return response;
+          })
+          .catch(() => null);
+
+        if (cached) {
+          event.waitUntil(network);
+          return cached;
+        }
+
+        // Nothing held and nothing to fetch. A network error is the honest
+        // answer, and it is also the useful one: the router responds to a
+        // failed flight fetch by falling back to a browser navigation, which
+        // the document handler below can still serve from the precache.
+        return (await network) ?? Response.error();
+      })()
+    );
+    return;
+  }
 
   // Article pages: serve cache immediately, refresh in the background.
   if (isArticle(url) && request.mode === "navigate") {
@@ -189,6 +247,15 @@ async function precacheOne(cache, path) {
     const html = await response.clone().text();
     await cache.put(path, response);
     await cacheReferencedAssets(html);
+
+    // The document only covers a hard navigation — typing the URL, a reload,
+    // or opening the PWA straight at it. Tapping the article in the queue goes
+    // through the client router, which wants the flight payload instead, so
+    // both have to be here or offline works from one direction only.
+    const flight = await fetch(path, { headers: { RSC: "1" } });
+    if (flight.ok && !flight.redirected && flight.type === "basic") {
+      await cache.put(rscKey(new URL(path, self.location.origin)), flight);
+    }
   } catch {
     // Offline or the fetch failed. Precaching is best-effort by definition.
   }
@@ -215,7 +282,12 @@ async function syncPrecache(paths) {
   // and twenty parallel article fetches would compete with the page you are
   // actually looking at.
   for (const path of paths) {
-    if (await cache.match(path)) continue;
+    // Both forms have to be present to skip. Checking only the document would
+    // permanently strand anything cached before the flight payload was stored
+    // alongside it.
+    const url = new URL(path, self.location.origin);
+    const held = (await cache.match(path)) && (await cache.match(rscKey(url)));
+    if (held) continue;
     await precacheOne(cache, path);
   }
 }

@@ -23,10 +23,18 @@ function check(name: string, ok: boolean, detail = "") {
 
 const ORIGIN = "https://www.rightread.net";
 
-/** Path for anything the worker hands us — string, or a Request-like object. */
+/**
+ * Path for anything the worker hands us — string, or a Request-like object.
+ *
+ * The query has to survive: the flight payload is stored at the same path as
+ * the document and told apart only by its `?__rr_rsc=1` marker, so dropping
+ * the query here would silently collapse the two into one entry and make the
+ * pruning assertions below pass for the wrong reason.
+ */
 function keyOf(target: unknown): string {
   const raw = typeof target === "string" ? target : (target as { url: string }).url;
-  return raw.startsWith("http") ? new URL(raw).pathname : raw;
+  const url = new URL(raw, ORIGIN);
+  return url.pathname + url.search;
 }
 
 function makeCaches() {
@@ -60,10 +68,16 @@ function loadWorker(responses: Record<string, Opts> = {}) {
   const listeners: Record<string, (e: unknown) => void> = {};
   const fetched: string[] = [];
   const cacheStore = makeCaches();
+  // Flipped mid-test to model the actual scenario: precache while there is a
+  // network, then read with none at all.
+  const net = { offline: false };
 
-  const fetchStub = async (t: unknown) => {
+  const fetchStub = async (t: unknown, init?: { headers?: Record<string, string> }) => {
     const path = keyOf(t);
-    fetched.push(path);
+    if (net.offline) throw new TypeError("Failed to fetch");
+    // Flight-payload fetches are recorded distinctly from document fetches so
+    // a test can tell which of the two the worker actually asked for.
+    fetched.push(init?.headers?.RSC === "1" ? `${path}#rsc` : path);
     const o = responses[path] ?? {};
     const html = o.html ?? "<html></html>";
     return {
@@ -87,6 +101,9 @@ function loadWorker(responses: Record<string, Opts> = {}) {
     },
     caches: cacheStore,
     fetch: fetchStub,
+    // Only `error()` is used, as the last resort when there is nothing cached
+    // and no network to ask.
+    Response: { error: () => ({ networkError: true }) },
     URL,
     Set,
     Map,
@@ -97,7 +114,30 @@ function loadWorker(responses: Record<string, Opts> = {}) {
 
   const context = createContext(sandbox);
   runInContext(readFileSync("public/sw.js", "utf8"), context);
-  return { listeners, fetched, cacheStore };
+  return { listeners, fetched, cacheStore, net };
+}
+
+/** Drives the fetch listener and returns whatever it responded with. */
+async function sendFetch(
+  listeners: Record<string, (e: unknown) => void>,
+  path: string,
+  opts: { rsc?: boolean } = {}
+) {
+  let responded: Promise<unknown> | undefined;
+  const request = {
+    method: "GET",
+    url: `${ORIGIN}${path}`,
+    mode: opts.rsc ? "cors" : "navigate",
+    headers: { get: (name: string) => (opts.rsc && name === "RSC" ? "1" : null) },
+  };
+  listeners.fetch({
+    request,
+    respondWith: (p: Promise<unknown>) => {
+      responded = p;
+    },
+    waitUntil: () => {},
+  });
+  return responded ? await responded : undefined;
 }
 
 /** Fires the message listener and awaits whatever it passed to waitUntil. */
@@ -115,6 +155,11 @@ function precacheOf(cacheStore: ReturnType<typeof makeCaches>) {
   return name ? [...cacheStore.stores.get(name)!.keys()].sort() : [];
 }
 
+/** Just the documents — each article also stores a flight payload alongside. */
+function documentsOf(cacheStore: ReturnType<typeof makeCaches>) {
+  return precacheOf(cacheStore).filter((k) => !k.includes("__rr_rsc"));
+}
+
 // ── Pulls down the requested queue ────────────────────────────────
 {
   const { listeners, fetched, cacheStore } = loadWorker();
@@ -123,7 +168,7 @@ function precacheOf(cacheStore: ReturnType<typeof makeCaches>) {
     paths: ["/read/a", "/read/b", "/read/c"],
   });
 
-  const cached = precacheOf(cacheStore);
+  const cached = documentsOf(cacheStore);
   check(
     "precaches every requested article",
     JSON.stringify(cached) === JSON.stringify(["/read/a", "/read/b", "/read/c"]),
@@ -176,9 +221,10 @@ function precacheOf(cacheStore: ReturnType<typeof makeCaches>) {
   await sendMessage(listeners, { type: "PRECACHE_ARTICLES", paths });
   const afterSecond = fetched.filter((f) => f.startsWith("/read/")).length;
 
+  // Two articles, each fetched twice — document and flight payload.
   check(
     "a second sync re-fetches nothing",
-    afterFirst === 2 && afterSecond === 2,
+    afterFirst === 4 && afterSecond === afterFirst,
     `first ${afterFirst}, second ${afterSecond}`
   );
 }
@@ -253,7 +299,7 @@ function precacheOf(cacheStore: ReturnType<typeof makeCaches>) {
 {
   const { listeners, cacheStore } = loadWorker();
   await sendMessage(listeners, { type: "PRECACHE_ARTICLES", paths: ["/read/a"] });
-  check("something is cached first", precacheOf(cacheStore).length === 1);
+  check("something is cached first", documentsOf(cacheStore).length === 1);
 
   await sendMessage(listeners, { type: "CLEAR_CACHES" });
   check(
@@ -261,6 +307,80 @@ function precacheOf(cacheStore: ReturnType<typeof makeCaches>) {
     cacheStore.stores.size === 0,
     JSON.stringify([...cacheStore.stores.keys()])
   );
+}
+
+// ── Both forms of the page are taken ──────────────────────────────
+// A tap in the queue goes through the client router and asks for a flight
+// payload; only a hard navigation asks for the document. Storing one without
+// the other makes offline work from one direction and fail from the other.
+{
+  const { listeners, fetched, cacheStore } = loadWorker();
+  await sendMessage(listeners, { type: "PRECACHE_ARTICLES", paths: ["/read/a"] });
+
+  check("fetches the document", fetched.includes("/read/a"), JSON.stringify(fetched));
+  check("fetches the flight payload", fetched.includes("/read/a#rsc"), JSON.stringify(fetched));
+
+  const cached = precacheOf(cacheStore);
+  check("stores the document", cached.includes("/read/a"), JSON.stringify(cached));
+  check(
+    "stores the flight payload under its own key",
+    cached.includes("/read/a?__rr_rsc=1"),
+    JSON.stringify(cached)
+  );
+}
+
+// ── The train: precache with signal, then read with none ──────────
+{
+  const { listeners, cacheStore, net } = loadWorker();
+  await sendMessage(listeners, { type: "PRECACHE_ARTICLES", paths: ["/read/a", "/read/b"] });
+
+  net.offline = true; // airplane mode
+
+  const tapped = await sendFetch(listeners, "/read/a", { rsc: true });
+  check(
+    "tapping a precached article offline serves the flight payload",
+    tapped !== undefined && !(tapped as { networkError?: boolean }).networkError,
+    JSON.stringify(tapped)
+  );
+
+  const typed = await sendFetch(listeners, "/read/b");
+  check(
+    "a hard navigation offline serves the precached document",
+    typed !== undefined && !(typed as { networkError?: boolean }).networkError,
+    JSON.stringify(typed)
+  );
+
+  // Nothing was evicted by reading while offline.
+  check("both articles still held", precacheOf(cacheStore).length === 4, JSON.stringify(precacheOf(cacheStore)));
+}
+
+// ── Offline, for something never precached ────────────────────────
+{
+  const { listeners, net } = loadWorker();
+  await sendMessage(listeners, { type: "PRECACHE_ARTICLES", paths: ["/read/a"] });
+  net.offline = true;
+
+  const missing = await sendFetch(listeners, "/read/zzz", { rsc: true });
+  check(
+    "an uncached article returns a network error, so the router falls back",
+    (missing as { networkError?: boolean })?.networkError === true,
+    JSON.stringify(missing)
+  );
+}
+
+// ── Pruning covers both forms ─────────────────────────────────────
+{
+  const { listeners, cacheStore } = loadWorker();
+  await sendMessage(listeners, { type: "PRECACHE_ARTICLES", paths: ["/read/a", "/read/b"] });
+  await sendMessage(listeners, { type: "PRECACHE_ARTICLES", paths: ["/read/b"] });
+
+  const cached = precacheOf(cacheStore);
+  check(
+    "a dropped article leaves neither document nor payload behind",
+    !cached.some((k) => k.startsWith("/read/a")),
+    JSON.stringify(cached)
+  );
+  check("the surviving article keeps both", cached.length === 2, JSON.stringify(cached));
 }
 
 console.log(failed ? `\n${failed} FAILED` : `\nall passed`);
