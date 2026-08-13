@@ -70,12 +70,26 @@ AUTH_SECRET="<openssl rand -hex 32>"       # NOT the same as any other app's
 AUTH_URL="https://www.rightread.net"
 AUTH_TRUST_HOST=true
 AUTH_RESEND_KEY="<resend key>"
-EMAIL_FROM="rightread <onboarding@resend.dev>"
+EMAIL_FROM="rightread <noreply@send.example.com>"   # MUST be a verified domain
 DATABASE_URL="file:/app/data/production.db"
 RIGHTREAD_ALLOWED_EMAILS="you@example.com,someone@else.com"
 OPENROUTER_API_KEY="<openrouter key>"
 OPENROUTER_MODEL="openai/gpt-5.6-luna"
 ```
+
+`EMAIL_FROM` must use a domain **verified at resend.com/domains**, and this
+only starts to matter once there is more than one user. On the shared
+`onboarding@resend.dev` sender a Resend account is in testing mode and will
+deliver *only to the account owner's own address*, rejecting everyone else with
+a 403. So the box appears to work perfectly for whoever owns the Resend account
+and fails for every other person on the allow list — the one failure the
+account owner cannot reproduce.
+
+Verify a **subdomain** (`send.rightread.net`), never the apex. A domain may
+carry only one SPF record, and `rightread.net` already has one for Gandi mail;
+verifying the apex means hand-merging it, and a mistake there breaks ordinary
+email for the domain. A subdomain gets its own SPF and DKIM and leaves the
+existing mail setup alone.
 
 `RIGHTREAD_ALLOWED_EMAILS` is the sign-in gate, and it is the one variable that
 **must not** be forgotten here: leave it out and it reaches the container as an

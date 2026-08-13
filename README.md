@@ -67,7 +67,7 @@ the server console** — copy it from there.
 | `AUTH_URL` | Public origin in production. **Leave unset** for local/LAN use — see below. |
 | `AUTH_TRUST_HOST` | `true`. Lets the sign-in link follow the host you opened. |
 | `AUTH_RESEND_KEY` | Resend API key. Blank ⇒ link logged to the console. |
-| `EMAIL_FROM` | Sender address for those emails. |
+| `EMAIL_FROM` | Sender address for those emails. Must be at a **Resend-verified domain** once there is more than one user — the shared `resend.dev` sender only reaches the account owner. |
 | `RIGHTREAD_ALLOWED_EMAILS` | Comma-separated list of addresses allowed to sign in. **Blank ⇒ nobody can** — see [Who can sign in](#who-can-sign-in). |
 | `OPENROUTER_API_KEY` | OpenRouter key. Without it classification degrades to `other`; nothing breaks. |
 | `OPENROUTER_MODEL` | Defaults to `openai/gpt-5.6-luna`. One model for all of rightread. |
