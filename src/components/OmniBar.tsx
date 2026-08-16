@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { classifyInput, extractFirstUrl } from "@/lib/url";
+import { Star } from "@/components/icons";
 
 /**
  * One box, two jobs: save a link, or search the library.
@@ -27,10 +28,17 @@ export function OmniBar({
   onSaved,
   onSearchTermChange,
   autoFocus = false,
+  starredCount = 0,
+  starredOnly = false,
+  onToggleStarred,
 }: {
   onSaved: () => Promise<void> | void;
   onSearchTermChange: (term: string) => void;
   autoFocus?: boolean;
+  /** Starred items in the current list. The toggle is hidden when there are none. */
+  starredCount?: number;
+  starredOnly?: boolean;
+  onToggleStarred?: () => void;
 }) {
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -148,6 +156,32 @@ export function OmniBar({
             transition: "border-color 120ms",
           }}
         />
+        {/* The starred filter lives in this row rather than on one of its own:
+            it is a control that is usually off, and a whole strip of chrome
+            above the list costs a row of articles on every screen to say so.
+            Hidden in link mode — Save takes that space, and filtering the list
+            is not what you are doing mid-paste. */}
+        {!isLink && starredCount > 0 && onToggleStarred && (
+          <button
+            type="button"
+            onClick={onToggleStarred}
+            aria-pressed={starredOnly}
+            aria-label={
+              starredOnly
+                ? `Showing ${starredCount} starred. Show everything`
+                : `Show only ${starredCount} starred`
+            }
+            title={starredOnly ? "Show everything" : "Show only starred"}
+            className="flex shrink-0 items-center gap-1 rounded-lg border px-2.5 text-sm transition-colors"
+            style={{
+              borderColor: starredOnly ? "var(--accent)" : "var(--border)",
+              color: starredOnly ? "var(--accent)" : "var(--text-muted)",
+            }}
+          >
+            <Star size={15} filled={starredOnly} />
+            <span className="tabular-nums">{starredCount}</span>
+          </button>
+        )}
         {isLink && (
           <button
             type="submit"

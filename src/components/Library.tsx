@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ListItem } from "@/lib/items";
 import { ItemRow } from "@/components/ItemRow";
 import { OmniBar } from "@/components/OmniBar";
-import { Star } from "@/components/icons";
 import { SearchResults, type SearchPayload } from "@/components/SearchResults";
 import { useOfflinePrecache } from "@/components/useOfflinePrecache";
 
@@ -222,25 +221,13 @@ export function Library({ initialItems, status }: Props) {
 
   return (
     <div>
-      <OmniBar onSaved={refresh} onSearchTermChange={setSearchTerm} />
-
-      {starredCount > 0 && (
-        <div className="flex justify-end px-3 pb-2 sm:px-4">
-          <button
-            type="button"
-            onClick={() => setStarredOnly((v) => !v)}
-            aria-pressed={starredOnly}
-            className="flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors"
-            style={{
-              borderColor: starredOnly ? "var(--accent)" : "var(--border)",
-              color: starredOnly ? "var(--accent)" : "var(--text-muted)",
-            }}
-          >
-            <Star size={15} filled={starredOnly} />
-            {starredCount}
-          </button>
-        </div>
-      )}
+      <OmniBar
+        onSaved={refresh}
+        onSearchTermChange={setSearchTerm}
+        starredCount={starredCount}
+        starredOnly={starredOnly}
+        onToggleStarred={() => setStarredOnly((v) => !v)}
+      />
 
       {error && (
         <p className="px-4 py-2 text-sm text-red-600" role="alert">
