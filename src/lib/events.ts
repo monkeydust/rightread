@@ -25,7 +25,22 @@ export type ItemsChanged = {
   itemId?: string;
 };
 
-type Listener = (event: ItemsChanged) => void;
+/**
+ * A group this user belongs to changed — someone shared, or membership moved.
+ *
+ * Delivered to every member, so unlike `items-changed` one publish call has
+ * several recipients; see `publishToAll`. Thin for the same reason: the client
+ * refetches the shelf rather than trying to apply a delta.
+ */
+export type GroupsChanged = {
+  type: "groups-changed";
+  cause: "shared" | "dismissed" | "membership" | "removed";
+  groupId?: string;
+};
+
+export type AppEvent = ItemsChanged | GroupsChanged;
+
+type Listener = (event: AppEvent) => void;
 
 /**
  * Survives hot-reload in dev. Without this, every edit leaks the previous
@@ -64,7 +79,7 @@ export function subscribe(userId: string, listener: Listener): () => void {
  * background work, and a broken listener must not fail the work that triggered
  * it — the same contract classification already honours.
  */
-export function publish(userId: string, event: ItemsChanged): void {
+export function publish(userId: string, event: AppEvent): void {
   const set = listeners.get(userId);
   if (!set?.size) return;
 
@@ -76,6 +91,18 @@ export function publish(userId: string, event: ItemsChanged): void {
       set.delete(listener);
     }
   }
+}
+
+/**
+ * Notifies several users of the same event — a group share reaching everyone on
+ * the shelf.
+ *
+ * A loop over `publish` rather than a broadcast channel, because the registry
+ * is keyed by user and a group's membership is small. Inherits `publish`'s
+ * contract: it never throws, and a user with no open tab costs nothing.
+ */
+export function publishToAll(userIds: Iterable<string>, event: AppEvent): void {
+  for (const userId of userIds) publish(userId, event);
 }
 
 /** Connected tab count for a user — used by the SSE route's logging. */

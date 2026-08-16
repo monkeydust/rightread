@@ -29,6 +29,21 @@
  * carry a userId, so importing them without remapping would orphan every one
  * of them. Users match on email, items on (userId, url) — the same uniqueness
  * the Prisma schema enforces.
+ *
+ * GROUPS ARE NOT MERGED, and the omission is deliberate rather than pending.
+ * A Group has no natural key: `name` is not unique and any member can change
+ * it. Matching on name would fuse two unrelated groups that happen to both be
+ * called "Reading" and thereby hand each side's members access to the other's
+ * shelf — a merge that manufactures a privacy breach. Matching on id instead
+ * is safe but useless: ids only coincide when one database was copied from the
+ * other, which is the case where there is nothing to merge.
+ *
+ * The honest price is that groups are recreated by hand after seeding a server
+ * from a local database. A group is one row plus a few invitations, so that is
+ * a minute of typing. If it ever stops being a minute, the fix is to match
+ * Group on id — legitimate because, unlike a User, a group has no second
+ * creation path — and to remap `MemberOf`, `GroupInvite`, `GroupShare` and
+ * `GroupShareDismissal` through both a groupIdMap and the existing userIdMap.
  */
 
 import "dotenv/config";
@@ -265,6 +280,17 @@ function main() {
         .map((t) => `${t} ${dst.prepare(`SELECT count(*) c FROM ${t}`).get().c}`)
         .join(", ")
   );
+  // Said out loud rather than left to the header comment: a merge that quietly
+  // dropped a group would look exactly like a successful one.
+  if (hasTable(src, "Group")) {
+    const groups = src.prepare("SELECT count(*) c FROM `Group`").get().c;
+    if (groups > 0) {
+      console.log(
+        `\n  Groups: not merged (${groups} in the source). A group has no natural key,` +
+          `\n  so recreate them by hand on the target — see the note at the top of this script.`
+      );
+    }
+  }
   if (dryRun) console.log("\n  Dry run — no changes written.");
 
   src.close();

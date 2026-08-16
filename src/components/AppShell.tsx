@@ -3,7 +3,7 @@ import { signOut } from "@/auth";
 import { Wordmark } from "@/components/Wordmark";
 
 type Props = {
-  active: "queue" | "archive" | "graph" | "discover";
+  active: "queue" | "archive" | "graph" | "discover" | "groups";
   counts: { unread: number; archived: number };
   /**
    * The graph needs room to be legible; the reading views deliberately do not.
@@ -12,6 +12,8 @@ type Props = {
   wide?: boolean;
   /** Undismissed recommendations. Omitted on pages that have not counted them. */
   discoverCount?: number;
+  /** Undismissed shares across my groups. Omitted where it has not been counted. */
+  groupCount?: number;
   children: React.ReactNode;
 };
 
@@ -57,6 +59,7 @@ export function AppShell({
   counts,
   wide = false,
   discoverCount,
+  groupCount,
   children,
 }: Props) {
   return (
@@ -114,6 +117,9 @@ export function AppShell({
           </Tab>
           <Tab href="/discover" active={active === "discover"}>
             Discover{discoverCount ? ` (${discoverCount})` : ""}
+          </Tab>
+          <Tab href="/groups" active={active === "groups"}>
+            Groups{groupCount ? ` (${groupCount})` : ""}
           </Tab>
         </nav>
       </header>

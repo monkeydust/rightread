@@ -17,7 +17,7 @@
 // Bump on any change to styling or markup: cached article HTML references
 // hashed CSS/font URLs, and stale HTML pointing at deleted chunks renders
 // unstyled. Activation deletes every cache not matching this suffix.
-const VERSION = "v15";
+const VERSION = "v16";
 const SHELL_CACHE = `rr-shell-${VERSION}`;
 const ARTICLE_CACHE = `rr-articles-${VERSION}`;
 const ASSET_CACHE = `rr-assets-${VERSION}`;
@@ -92,7 +92,12 @@ function isNeverCached(url) {
     url.pathname.startsWith("/api/") ||
     url.pathname.startsWith("/share") ||
     url.pathname.startsWith("/login") ||
-    url.pathname.startsWith("/settings")
+    url.pathname.startsWith("/settings") ||
+    // A group shelf is other people's links and other people's email
+    // addresses, and it changes when they act rather than when you do. Caching
+    // it would write their data to this device and then serve a stale shelf
+    // offline, where Save cannot work anyway.
+    url.pathname.startsWith("/groups")
   );
 }
 

@@ -61,4 +61,27 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       return session;
     },
   },
+  events: {
+    /**
+     * Turns any group invitations waiting for this address into memberships.
+     *
+     * Deliberately an event and not the `signIn` callback above. That callback
+     * runs *before* the adapter creates the account, so `user.id` is undefined
+     * for exactly the case this exists to serve — someone invited who has never
+     * signed in before. `events.signIn` fires once sign-in has succeeded and
+     * the row exists, for new and returning accounts alike.
+     *
+     * This is not a second door. It runs only after the allow list has already
+     * admitted the address; an invite to someone not on that list sits unredeemed
+     * until whoever runs the server adds them.
+     */
+    async signIn({ user }) {
+      if (!user.id || !user.email) return;
+      const { redeemInvites } = await import("@/lib/groups/access");
+      const joined = await redeemInvites(user.id, user.email);
+      if (joined.length > 0) {
+        console.log(`[groups] ${user.email} joined ${joined.length} group(s) by invite`);
+      }
+    },
+  },
 });

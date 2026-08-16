@@ -148,7 +148,7 @@ async function persistArticle(
   userId: string | undefined,
   notify: (cause: "extracted" | "classified") => void
 ): Promise<void> {
-  await prisma.item.update({
+  const updated = await prisma.item.update({
     where: { id: itemId },
     data: {
       title: article.title,
@@ -187,6 +187,19 @@ async function persistArticle(
   if (userId) {
     const { recommendForItem } = await import("@/lib/phrases/match");
     await recommendForItem(userId, itemId);
+
+    // If this link is sitting on a group shelf with only a hostname for a
+    // title — which is what sharing straight after saving produces — fill the
+    // card in now that there is something real to fill it with.
+    // Both spellings: a share stores the URL as it was captured, which is not
+    // the resolved one when the origin redirected.
+    const { backfillSharesForItem } = await import("@/lib/groups/share");
+    await backfillSharesForItem(userId, [updated.url, article.resolvedUrl], {
+      title: article.title,
+      siteName: article.siteName,
+      excerpt: article.excerpt,
+      leadImage: article.leadImage,
+    });
   }
 }
 

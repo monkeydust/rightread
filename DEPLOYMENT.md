@@ -135,10 +135,45 @@ docker rm -f $(docker ps -aq -f name=rightread) 2>/dev/null || true
 docker-compose --env-file .env.prod up -d --build
 ```
 
+### Rolling back a release that added tables
+
+`start.sh` runs `npx prisma db push` at boot under `set -e`, and `db push`
+refuses to drop a table that has rows in it. So rolling back to a commit whose
+`schema.prisma` predates a new model is not a plain code rollback: push plans a
+`DROP TABLE`, refuses, exits non-zero, the boot dies, and `restart:
+unless-stopped` turns that into a crash loop with the site down.
+
+Two consequences worth holding onto:
+
+- **Ship a schema change and the code that uses it as separate deploys.** The
+  schema alone is inert — new tables nothing reads — so the second deploy is
+  the only one that needs reverting, and reverting it is pure code.
+- **If you must roll the schema back**, empty the tables first, from a shell on
+  the box, in foreign-key order. For the group models that is:
+
+  ```bash
+  docker-compose --env-file .env.prod exec app \
+    sqlite3 /app/data/production.db \
+    "DROP TABLE IF EXISTS GroupShareDismissal; \
+     DROP TABLE IF EXISTS GroupShare; \
+     DROP TABLE IF EXISTS GroupInvite; \
+     DROP TABLE IF EXISTS MemberOf; \
+     DROP TABLE IF EXISTS \"Group\";"
+  ```
+
+  Take a backup first (`npm run db:backup`) — this is the one operation here
+  that genuinely destroys data.
+
 ## Data — nothing is lost unless you delete it
 
 SQLite lives in the named volume `rightread_sqlite_data`, mounted at
 `/app/data/production.db`.
+
+Groups are the exception to the merge story below: `scripts/db-merge.mjs` does
+not carry them, because a group has no natural key that survives a database
+boundary. Merging by name would fuse two unrelated groups and hand each side's
+members the other's shelf. The script says so in its output when the source has
+any; recreate them by hand on the target.
 
 > **Do not copy uk-property-analyzer's database step.** That project uploads
 > local `prisma/dev.db` over the server's copy on every deploy, because its

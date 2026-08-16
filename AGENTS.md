@@ -43,3 +43,33 @@ old ones. Candidates are deliberately not Items — the library is never
 polluted by machine-fetched articles, and saving a recommendation goes
 through the normal capture flow. The reader shows the panel only when
 something clears the measured similarity floor shared with semantic search.
+
+## Groups
+A shared shelf (`src/lib/groups/`). Every other model is owned by one user and
+read with `where: { userId }`, checked inline at each call site. Groups are the
+one exception — visibility is by **membership** — so all four group models are
+read only through `src/lib/groups/access.ts`. Nothing else queries them
+directly, and a share id is never trusted alone: `resolveShare` checks
+membership of the group the share belongs to, or a bare id becomes a handle
+into another group's shelf. Refusals are 404, never 403.
+
+Two decisions worth not undoing:
+
+- **A `GroupShare` carries its own snapshot** of the link rather than pointing
+  at the sharer's `Item`. The shelf then survives the sharer deleting or
+  archiving their copy, and Save is just `captureUrl()` — so the saved row is
+  an ordinary Item and ordering, starring, search and the graph need no
+  group-awareness at all. `sharedByUserId` is nullable with `SetNull`, against
+  the cascade-everywhere convention, because a share is on a shelf other people
+  read: closing your account must not erase your contributions from it.
+- **No `contentHtml` crosses a user boundary.** `applyProvidedContent()` stores
+  HTML the sharer's own browser supplied, so serving it to a group republishes
+  something they never chose to, and turns a sanitizer bypass from self-XSS
+  into cross-account XSS. The shelf is a metadata card; reading happens in your
+  own copy after Save. The cost is that a paywalled article a sharer captured
+  from their own session may not extract for anyone else.
+
+Invites are redeemed in `events.signIn` (not the `signIn` callback — the
+account does not exist yet there). An invite is not permission to sign in:
+`RIGHTREAD_ALLOWED_EMAILS` remains the only gate, so an invite to an address
+not on it stays dormant, and the UI says so rather than implying otherwise.

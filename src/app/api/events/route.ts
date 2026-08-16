@@ -1,5 +1,5 @@
 import { auth } from "@/auth";
-import { subscribe, type ItemsChanged } from "@/lib/events";
+import { subscribe, type AppEvent } from "@/lib/events";
 
 /**
  * GET /api/events — Server-Sent Events stream for the signed-in user.
@@ -64,8 +64,12 @@ export async function GET(request: Request) {
       send("retry: 3000\n\n");
       send(": connected\n\n");
 
-      unsubscribe = subscribe(userId, (event: ItemsChanged) => {
-        send(`event: items-changed\ndata: ${JSON.stringify(event)}\n\n`);
+      // The event's own `type` is the SSE event name, so a client can listen
+      // for just the one it cares about — the shelf does not need to refetch
+      // because an extraction finished, and the queue does not need to refetch
+      // because someone shared into a group.
+      unsubscribe = subscribe(userId, (event: AppEvent) => {
+        send(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
       });
 
       heartbeat = setInterval(() => send(": ping\n\n"), HEARTBEAT_MS);
