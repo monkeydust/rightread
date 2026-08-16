@@ -1,4 +1,6 @@
+import { JSDOM } from "jsdom";
 import { prisma } from "@/lib/db";
+import { sanitizeArticleHtml } from "@/lib/sanitize";
 import { normalizeUrl, hostLabel } from "@/lib/url";
 import { extractArticle, extractFromHtml, type Extracted } from "@/lib/extract";
 import { youtubeVideoId, extractYouTube } from "@/lib/extract-video";
@@ -251,6 +253,94 @@ export async function applyProvidedContent(
     publish(item.userId, { type: "items-changed", cause, itemId });
 
   await persistArticle(itemId, article, item.userId, notify);
+}
+
+/**
+ * Seeds a freshly-saved item with the article text the sharer already had.
+ *
+ * The case this exists for: someone captures a paywalled or bot-checked page
+ * through `applyProvidedContent`, using their own browser session, and shares
+ * it. The server cannot reach that page, so the recipient's own extraction
+ * fails and they are shown a "paste the page" prompt for a page they may have
+ * no way to open. The work was already done once; asking a second person to
+ * redo it is asking for something they cannot do.
+ *
+ * This crosses the line the `GroupShare` model otherwise holds — one user's
+ * `contentHtml` reaching another. Three things make it defensible here, and
+ * they should be kept together if this is ever revisited:
+ *
+ *  - It only ever moves along a share the sharer deliberately made, to a group
+ *    they chose. The "they never agreed to republish this" objection is about
+ *    *incidental* exposure; here republishing to those people is the action.
+ *  - The HTML is re-sanitized on the way in, against the current allow list
+ *    rather than whichever one was in force when it was first stored. The
+ *    reader renders this with `dangerouslySetInnerHTML`, so this is the gate,
+ *    and passing it twice is strictly better than passing it once.
+ *  - It is a seed, not a replacement. `runExtraction` is already in flight from
+ *    `captureUrl`; if the recipient's own fetch succeeds it overwrites this
+ *    with their own copy, and if it fails its failure branch explicitly keeps
+ *    whatever content is already on the row. So the fresh copy wins when there
+ *    is one, and this is the floor when there is not.
+ *
+ * Never throws: a save that produced a working item must not fail because the
+ * copy could not be improved.
+ */
+export async function adoptSharedArticle(
+  itemId: string,
+  source: {
+    title: string;
+    siteName: string | null;
+    byline: string | null;
+    excerpt: string | null;
+    leadImage: string | null;
+    contentHtml: string | null;
+    textContent: string | null;
+    wordCount: number | null;
+    url: string;
+  }
+): Promise<boolean> {
+  if (!source.contentHtml) return false;
+
+  try {
+    const existing = await prisma.item.findUnique({
+      where: { id: itemId },
+      select: { contentHtml: true, userId: true },
+    });
+    // Already has a body of its own — either their extraction won the race or
+    // they had saved this before. Leave it alone.
+    if (!existing || existing.contentHtml) return false;
+
+    const dom = new JSDOM("");
+    const contentHtml = sanitizeArticleHtml(dom.window, source.contentHtml, source.url);
+    dom.window.close();
+    if (!contentHtml) return false;
+
+    await prisma.item.update({
+      where: { id: itemId },
+      data: {
+        title: source.title,
+        siteName: source.siteName,
+        byline: source.byline,
+        excerpt: source.excerpt,
+        leadImage: source.leadImage,
+        contentHtml,
+        textContent: source.textContent,
+        wordCount: source.wordCount,
+        extractStatus: "ok",
+        extractError: null,
+        extractedAt: new Date(),
+      },
+    });
+
+    publish(existing.userId, { type: "items-changed", cause: "extracted", itemId });
+    return true;
+  } catch (err) {
+    console.warn(
+      `[rightread] could not adopt the shared copy for item ${itemId}:`,
+      err instanceof Error ? err.message : err
+    );
+    return false;
+  }
 }
 
 /**

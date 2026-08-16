@@ -68,12 +68,15 @@ Two further decisions worth not undoing:
   group-awareness at all. `sharedByUserId` is nullable with `SetNull`, against
   the cascade-everywhere convention, because a share is on a shelf other people
   read: closing your account must not erase your contributions from it.
-- **No `contentHtml` crosses a user boundary.** `applyProvidedContent()` stores
-  HTML the sharer's own browser supplied, so serving it to a group republishes
-  something they never chose to, and turns a sanitizer bypass from self-XSS
-  into cross-account XSS. The shelf is a metadata card; reading happens in your
-  own copy after Save. The cost is that a paywalled article a sharer captured
-  from their own session may not extract for anyone else.
+- **The shelf never renders another user's markup.** A `GroupShare` holds no
+  `contentHtml`; browsing a group shows cards. On Save, though, the new item
+  seeds itself from the sharer's extracted copy
+  (`adoptSharedArticle()` in `lib/capture.ts`), because
+  `applyProvidedContent()` means the sharer's text can be a paywalled page no
+  other server fetch can reproduce — so without it the articles most worth
+  sharing arrive broken. It is re-sanitized on the way in, against the current
+  allow list, and it is a seed: the recipient's own extraction overwrites it
+  when it succeeds and preserves it when it fails.
 
 Invites are redeemed in `events.signIn` (not the `signIn` callback — the
 account does not exist yet there). An invite is not permission to sign in:

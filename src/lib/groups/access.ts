@@ -186,7 +186,10 @@ export async function listShelf(userId: string, groupId: string): Promise<ShelfI
 export async function resolveShare(userId: string, shareId: string) {
   const share = await prisma.groupShare.findUnique({
     where: { id: shareId },
-    select: { id: true, groupId: true, url: true, title: true },
+    // sharedByUserId so a save can seed itself from the sharer's own extracted
+    // copy — the only way a paywalled page they captured by hand is readable
+    // for anyone else.
+    select: { id: true, groupId: true, url: true, title: true, sharedByUserId: true },
   });
   if (!share) throw new NotAMember();
   await requireMember(userId, share.groupId);

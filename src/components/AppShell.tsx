@@ -87,6 +87,18 @@ export function AppShell({
             >
               Settings
             </Link>
+            {/* Graph sits up here rather than in the tab bar: it is a way of
+                looking at the library, not another list to read from, and the
+                tabs were getting crowded enough on a phone to start wrapping. */}
+            <Link
+              href="/graph"
+              className={headerAction}
+              style={
+                active === "graph" ? { color: "var(--accent)" } : headerActionStyle
+              }
+            >
+              Graph
+            </Link>
             <form
               className="flex"
               action={async () => {
@@ -111,9 +123,6 @@ export function AppShell({
           </Tab>
           <Tab href="/archive" active={active === "archive"}>
             Archive{counts.archived ? ` (${counts.archived})` : ""}
-          </Tab>
-          <Tab href="/graph" active={active === "graph"}>
-            Graph
           </Tab>
           <Tab href="/discover" active={active === "discover"}>
             Discover{discoverCount ? ` (${discoverCount})` : ""}

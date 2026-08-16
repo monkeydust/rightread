@@ -348,15 +348,19 @@ model GroupInvite {
 /// a share is then just an ordinary `captureUrl()`, so the saved row is a normal
 /// Item that sorts, stars, searches and graphs with no special cases anywhere.
 ///
-/// There is deliberately no `contentHtml` here, and adding one would be a
-/// mistake worth arguing about first. `Item.contentHtml` is not always
-/// server-fetched — `applyProvidedContent()` stores HTML the sharer's own
-/// browser supplied, from a paywalled page they were logged into or one behind
-/// a check they personally passed. Serving that to a group turns "I saved my
-/// copy" into "I republished it", a decision they never made. It also changes
-/// the blast radius of a sanitizer bypass from self-XSS into cross-account XSS,
-/// in a same-origin app holding a year-long session cookie. Reading happens in
-/// your own copy, after Save.
+/// There is deliberately no `contentHtml` on this row. The shelf is a list of
+/// cards, not a reading surface, so browsing a group never renders anybody
+/// else's markup and a share costs a few hundred bytes rather than an article.
+///
+/// The text does move on Save, though, and that is a deliberate exception
+/// rather than an oversight — see `adoptSharedArticle()` in lib/capture.ts for
+/// the full argument. In short: `Item.contentHtml` is not always
+/// server-fetched, because `applyProvidedContent()` stores HTML the sharer's
+/// own browser supplied from a paywalled page they were logged into. Nobody
+/// else's server fetch can reproduce that, so without carrying it across, the
+/// articles most worth sharing are exactly the ones that arrive broken. It is
+/// re-sanitized on the way in, and only ever travels along a share the sharer
+/// deliberately made to a group they chose.
 ///
 /// The cost is a snapshot that can age and a second extraction per member who
 /// saves. Both are cheap next to the alternative.

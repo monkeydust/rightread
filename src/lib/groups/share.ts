@@ -7,7 +7,7 @@
 
 import { prisma } from "@/lib/db";
 import { normalizeUrl, hostLabel } from "@/lib/url";
-import { captureUrl } from "@/lib/capture";
+import { captureUrl, adoptSharedArticle } from "@/lib/capture";
 import { publishToAll, publish } from "@/lib/events";
 import { memberIdsOf, requireMember, resolveShare } from "./access";
 import { snapshotFromItem, isBetterSnapshot } from "./rules";
@@ -185,8 +185,39 @@ export async function backfillSharesForItem(
  */
 export async function saveShare(userId: string, shareId: string) {
   const share = await resolveShare(userId, shareId);
+
+  // Read the sharer's copy before capturing, so it is ready the moment the row
+  // exists. Only content that actually extracted is worth carrying.
+  const source = share.sharedByUserId
+    ? await prisma.item.findUnique({
+        where: { userId_url: { userId: share.sharedByUserId, url: share.url } },
+        select: {
+          title: true,
+          siteName: true,
+          byline: true,
+          excerpt: true,
+          leadImage: true,
+          contentHtml: true,
+          textContent: true,
+          wordCount: true,
+          extractStatus: true,
+        },
+      })
+    : null;
+
   const { item, alreadySaved } = await captureUrl(userId, share.url);
-  return { item, alreadySaved, groupId: share.groupId };
+
+  // Give the new item the sharer's text straight away. Without this, a page the
+  // server cannot fetch — paywalled, or behind a check the sharer passed in
+  // their own browser — reaches the recipient as a failed extraction and a
+  // prompt to paste a page they may not be able to open. See adoptSharedArticle
+  // for why this is the one place a user's contentHtml may cross to another.
+  let adopted = false;
+  if (source?.contentHtml && source.extractStatus === "ok") {
+    adopted = await adoptSharedArticle(item.id, { ...source, url: share.url });
+  }
+
+  return { item, alreadySaved, adopted, groupId: share.groupId };
 }
 
 /** Hides a share from my own shelf. Everyone else still sees it. */
