@@ -10,6 +10,7 @@
 
 import { NotAMember } from "./access";
 import { InvalidGroupName, InvalidEmail } from "./manage";
+import { NotInLibrary } from "./share";
 
 /**
  * Maps a thrown group error to a Response, or returns null if it is not one of
@@ -19,7 +20,11 @@ export function groupErrorResponse(err: unknown): Response | null {
   if (err instanceof NotAMember) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
-  if (err instanceof InvalidGroupName || err instanceof InvalidEmail) {
+  if (
+    err instanceof InvalidGroupName ||
+    err instanceof InvalidEmail ||
+    err instanceof NotInLibrary
+  ) {
     return Response.json({ error: err.message }, { status: 400 });
   }
   return null;

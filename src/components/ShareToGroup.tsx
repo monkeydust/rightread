@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { People } from "@/components/icons";
 import type { GroupSummary } from "@/lib/groups/access";
 
 type State = "idle" | "loading" | "error";
@@ -18,9 +19,21 @@ type State = "idle" | "loading" | "error";
  * snapshot from your copy, and each member who saves it extracts their own —
  * no one's `contentHtml` crosses a user boundary.
  */
-export function ShareToGroup({ url, title }: { url: string; title: string }) {
+export function ShareToGroup({
+  url,
+  title,
+  variant = "text",
+  disabled = false,
+}: {
+  url: string;
+  title: string;
+  /** "text" for the reader header, "icon" to sit in a row's button rail. */
+  variant?: "text" | "icon";
+  disabled?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const toggleRef = useRef<HTMLButtonElement>(null);
+  const label = `Share “${title}” with a group`;
 
   return (
     <div className="relative">
@@ -29,11 +42,17 @@ export function ShareToGroup({ url, title }: { url: string; title: string }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        title={`Share “${title}” with a group`}
-        className="rounded-md px-2 py-1.5 text-[13px] font-medium hover:bg-[var(--bg-subtle)]"
+        aria-label={variant === "icon" ? label : undefined}
+        title={label}
+        disabled={disabled}
+        className={
+          variant === "icon"
+            ? "grid h-9 w-9 place-items-center rounded-md transition-colors hover:bg-[var(--bg-subtle)] disabled:cursor-default disabled:opacity-25"
+            : "rounded-md px-2 py-1.5 text-[13px] font-medium hover:bg-[var(--bg-subtle)]"
+        }
         style={{ color: "var(--text-muted)" }}
       >
-        Share
+        {variant === "icon" ? <People /> : "Share"}
       </button>
 
       {open && (

@@ -53,7 +53,13 @@ directly, and a share id is never trusted alone: `resolveShare` checks
 membership of the group the share belongs to, or a bare id becomes a handle
 into another group's shelf. Refusals are 404, never 403.
 
-Two decisions worth not undoing:
+**A share must already be in the sharer's library.** There is no paste box on
+a group page: sharing starts from a row in the queue or archive, or from the
+reader. `shareIntoGroup` enforces it (`NotInLibrary`) rather than leaving it to
+the UI, so a direct API call cannot put an arbitrary URL on someone's shelf. A
+shelf is meant to be things people actually chose to read.
+
+Two further decisions worth not undoing:
 
 - **A `GroupShare` carries its own snapshot** of the link rather than pointing
   at the sharer's `Item`. The shelf then survives the sharer deleting or

@@ -111,6 +111,25 @@ export function Trash(props: IconProps) {
   );
 }
 
+/**
+ * Share with a group.
+ *
+ * Two figures rather than the usual share glyph (a node-and-branches or an
+ * arrow leaving a box): both of those read as "send this elsewhere", and the
+ * action here is narrower — it puts the article on a shelf a few named people
+ * share. Nothing leaves the app.
+ */
+export function People(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="9" cy="8" r="3" />
+      <path d="M3 20a6 6 0 0 1 12 0" />
+      <path d="M16.5 5.5a3 3 0 0 1 0 5.8" />
+      <path d="M18 14.2a6 6 0 0 1 3 5.8" />
+    </Svg>
+  );
+}
+
 export function ExternalLink(props: IconProps) {
   return (
     <Svg {...props}>

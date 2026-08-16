@@ -7,6 +7,7 @@ import { hostLabel } from "@/lib/url";
 import { KINDS } from "@/lib/classify/kinds";
 import { ArrowUp, ArrowDown, Star, Check, Undo, Trash } from "@/components/icons";
 import { PasteCapture } from "@/components/PasteCapture";
+import { ShareToGroup } from "@/components/ShareToGroup";
 
 type Props = {
   item: ListItem;
@@ -265,6 +266,14 @@ export function ItemRow({
       </div>
 
       <div className="flex shrink-0 items-center gap-0.5">
+        {/* Sharing starts here, from something you actually saved — the group
+            shelf has no paste box. */}
+        <ShareToGroup
+          url={item.url}
+          title={item.title}
+          variant="icon"
+          disabled={busy}
+        />
         <IconButton
           label={item.starred ? "Remove star" : "Star"}
           onClick={() => onStar(item.id, !item.starred)}

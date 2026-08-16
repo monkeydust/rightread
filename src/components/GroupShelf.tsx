@@ -34,8 +34,6 @@ export function GroupShelf({
 }) {
   const router = useRouter();
   const [shares, setShares] = useState(initialShares);
-  const [url, setUrl] = useState("");
-  const [sharing, setSharing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -61,31 +59,6 @@ export function GroupShelf({
       source.close();
     };
   }, [refetch]);
-
-  async function share(event: React.FormEvent) {
-    event.preventDefault();
-    if (!url.trim() || sharing) return;
-
-    setSharing(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/groups/${groupId}/shares`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body?.error ?? "Could not share that link");
-      }
-      setUrl("");
-      await refetch();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not share that link");
-    } finally {
-      setSharing(false);
-    }
-  }
 
   async function act(shareId: string, kind: "save" | "dismiss" | "unshare") {
     setBusy(shareId);
@@ -132,24 +105,21 @@ export function GroupShelf({
         </Link>
       </div>
 
-      <form onSubmit={share} className="mt-4 flex gap-2">
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="Paste a link to share with the group"
-          aria-label="Link to share"
-          className="min-w-0 flex-1 rounded-lg border bg-transparent px-3 py-2 text-sm outline-none"
-          style={{ borderColor: "var(--border)" }}
-        />
-        <button
-          type="submit"
-          disabled={sharing || !url.trim()}
-          className="shrink-0 rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-40"
-          style={{ background: "var(--accent)", color: "var(--accent-ink)" }}
-        >
-          {sharing ? "…" : "Share"}
-        </button>
-      </form>
+      {/* No paste box here on purpose. A shelf is meant to be things people
+          actually chose to read, so a share starts from your own queue or
+          archive — the Share control on a row, or in the reader. The server
+          enforces it too; this is not just a hidden field. */}
+      <p className="mt-2 text-[13px]" style={{ color: "var(--text-muted)" }}>
+        To add something, open your{" "}
+        <Link href="/" className="underline">
+          queue
+        </Link>{" "}
+        or{" "}
+        <Link href="/archive" className="underline">
+          archive
+        </Link>{" "}
+        and use Share on the article.
+      </p>
 
       {error && (
         <p className="mt-2 text-[13px] text-red-600" role="alert">
@@ -162,7 +132,8 @@ export function GroupShelf({
           className="px-4 py-16 text-center text-sm"
           style={{ color: "var(--text-muted)" }}
         >
-          Nothing on the shelf yet. Paste a link above, or invite someone below.
+          Nothing on the shelf yet. Share something from your queue, or invite
+          someone below.
         </p>
       ) : (
         <ul className="mt-6">

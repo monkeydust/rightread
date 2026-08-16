@@ -12,14 +12,23 @@ import { publishToAll, publish } from "@/lib/events";
 import { memberIdsOf, requireMember, resolveShare } from "./access";
 import { snapshotFromItem, isBetterSnapshot } from "./rules";
 
+/** Thrown when someone tries to share a link they have not saved. Routes render it as 400. */
+export class NotInLibrary extends Error {
+  constructor() {
+    super("You can only share something that's in your queue or archive");
+    this.name = "NotInLibrary";
+  }
+}
+
 /**
  * Shares a URL into a group.
  *
- * The snapshot is copied from the sharer's own Item when they have one — which
- * they almost always do, since sharing is reached from an item in their queue —
- * so the shelf is populated without a second fetch of the origin. Sharing a URL
- * they have not saved is still allowed; the card then carries just the host
- * label until someone saves it.
+ * **The link must already be in the sharer's own library.** A group shelf is
+ * meant to be things people have actually chosen to read, not a paste box
+ * pointed at the internet, and the rule is enforced here rather than by hiding
+ * the UI — otherwise it is a convention that the first direct API call breaks.
+ * It also means the snapshot always comes from an Item that exists, so the
+ * shelf is populated without a second fetch of the origin.
  *
  * Re-sharing an existing link refreshes it rather than duplicating: `sharedAt`
  * moves, and every member's dismissal of it is cleared, which is what makes
@@ -43,6 +52,8 @@ export async function shareIntoGroup(
     }),
     prisma.user.findUnique({ where: { id: userId }, select: { email: true } }),
   ]);
+  if (!mine) throw new NotInLibrary();
+
   const snapshot = snapshotFromItem(mine, fallbackTitle);
   const trimmedNote = note?.trim() || null;
 
