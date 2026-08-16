@@ -27,6 +27,9 @@ model User {
   candidates      Candidate[]
   keyPhrases      KeyPhrase[]
   recommendations Recommendation[]
+  memberOf        MemberOf[]
+  shares          GroupShare[]
+  dismissals      GroupShareDismissal[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 }
@@ -277,4 +280,140 @@ model Recommendation {
   @@unique([userId, candidateId, originKind, originId])
   @@index([userId, score])
   @@index([originKind, originId])
+}
+
+// ─── Groups ─────────────────────────────────────────────────
+//
+// A reading club: several people who point each other at articles. Everything
+// above this line is owned by exactly one user and read with `where: { userId }`.
+// These four models are the exception — they are visible by *membership* — so
+// every read of them goes through `src/lib/groups/access.ts` rather than being
+// written inline. That is the whole containment strategy for the invariant.
+
+/// A named shelf shared by its members. No roles: every member may rename the
+/// group, invite, remove anyone, and share.
+model Group {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members MemberOf[]
+  shares  GroupShare[]
+  invites GroupInvite[]
+}
+
+/// Membership. Named for what it asserts — that a user is in a group — rather
+/// than `GroupMember`, which invites being read as a row that carries a role.
+model MemberOf {
+  id       String   @id @default(cuid())
+  groupId  String
+  userId   String
+  joinedAt DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([userId])
+}
+
+/// An invitation waiting for an address to sign in.
+///
+/// Stored normalized by `normalizeEmail()` — the same canonicalization Auth.js
+/// applies before writing `User.email` — so that the invite and the account it
+/// is waiting for actually match. Redeemed in the `signIn` callback.
+///
+/// Note that an invite is not permission to sign in: `RIGHTREAD_ALLOWED_EMAILS`
+/// remains the gate, so an invite to an address that is not on it sits here,
+/// valid but dormant, until that variable is changed on the server.
+model GroupInvite {
+  id        String   @id @default(cuid())
+  groupId   String
+  email     String
+  invitedBy String
+  createdAt DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, email])
+  @@index([email])
+}
+
+/// A link on a group's shelf.
+///
+/// Carries its own snapshot of the article rather than pointing at the sharer's
+/// Item: the shelf survives the sharer deleting or archiving their own copy,
+/// which a pointer would not given every foreign key here cascades, and saving
+/// a share is then just an ordinary `captureUrl()`, so the saved row is a normal
+/// Item that sorts, stars, searches and graphs with no special cases anywhere.
+///
+/// There is deliberately no `contentHtml` here, and adding one would be a
+/// mistake worth arguing about first. `Item.contentHtml` is not always
+/// server-fetched — `applyProvidedContent()` stores HTML the sharer's own
+/// browser supplied, from a paywalled page they were logged into or one behind
+/// a check they personally passed. Serving that to a group turns "I saved my
+/// copy" into "I republished it", a decision they never made. It also changes
+/// the blast radius of a sanitizer bypass from self-XSS into cross-account XSS,
+/// in a same-origin app holding a year-long session cookie. Reading happens in
+/// your own copy, after Save.
+///
+/// The cost is a snapshot that can age and a second extraction per member who
+/// saves. Both are cheap next to the alternative.
+model GroupShare {
+  id      String @id @default(cuid())
+  groupId String
+
+  /// Nullable with SetNull, not Cascade, and this is load-bearing: every other
+  /// foreign key in this schema cascades, but a share is not the sharer's
+  /// property — it is on a shelf other people read. Cascading would mean one
+  /// person closing their account silently erased every link they had ever
+  /// contributed, from every group, for everyone. `sharedByLabel` keeps the
+  /// attribution readable after the account is gone.
+  sharedByUserId String?
+  /// Denormalized at share time so the card still says who shared it once the
+  /// relation above has been nulled. Same reasoning as `GroupInvite.invitedBy`.
+  sharedByLabel  String  @default("")
+
+  /// normalizeUrl()'d. With groupId this is the natural key: one shelf slot per
+  /// link, so re-sharing refreshes rather than duplicating.
+  url       String
+  title     String   @default("Untitled")
+  siteName  String?
+  excerpt   String?
+  leadImage String?
+  /// Optional "why I'm sharing this".
+  note      String?
+  sharedAt  DateTime @default(now())
+  /// When the snapshot was last filled from a real extraction. Null means the
+  /// card is still whatever was known at share time — usually just a hostname,
+  /// because capture returns before extraction finishes. Distinguishing "never
+  /// filled" from "filled a while ago" is what lets the backfill in
+  /// `persistArticle` improve a card without ever downgrading one.
+  snapshotAt DateTime?
+
+  group      Group                 @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sharedBy   User?                 @relation(fields: [sharedByUserId], references: [id], onDelete: SetNull)
+  dismissals GroupShareDismissal[]
+
+  @@unique([groupId, url])
+  @@index([groupId, sharedAt])
+}
+
+/// One member hiding one share from their own view of the shelf.
+///
+/// Dismissing is per-person on purpose: it must not overrule the person who
+/// shared, and it is not a delete. A re-share clears it, so someone can put a
+/// link back in front of the group.
+model GroupShareDismissal {
+  id      String   @id @default(cuid())
+  shareId String
+  userId  String
+  at      DateTime @default(now())
+
+  share GroupShare @relation(fields: [shareId], references: [id], onDelete: Cascade)
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([shareId, userId])
+  @@index([userId])
 }
