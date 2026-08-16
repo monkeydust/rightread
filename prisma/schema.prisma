@@ -127,6 +127,17 @@ model Item {
   /// provenance — shown as a chip in the list, never affects ordering.
   recommended Boolean @default(false)
 
+  /// Saved off a group's shelf. Provenance only, exactly like `recommended`:
+  /// it tells you where something came from, and never affects ordering.
+  ///
+  /// The name is kept alongside the id rather than only joined at read time,
+  /// so the chip still reads "from Reading club" after you leave the group or
+  /// after the group is deleted. The relation is SetNull for that reason — the
+  /// item is yours and outlives the shelf it arrived from.
+  fromGroupId   String?
+  fromGroupName String?
+  fromGroup     Group?  @relation(fields: [fromGroupId], references: [id], onDelete: SetNull)
+
   /// unread | archived
   status   String    @default("unread")
   /// A marker you can filter by — deliberately NOT an ordering bucket.
@@ -301,6 +312,10 @@ model Group {
   members MemberOf[]
   shares  GroupShare[]
   invites GroupInvite[]
+  /// Items people saved off this shelf. Only here to complete the relation —
+  /// nothing reads a group's saved items, and it must never be used to, since
+  /// those rows belong to their owners and are read with `where: { userId }`.
+  saved   Item[]
 }
 
 /// Membership. Named for what it asserts — that a user is in a group — rather
