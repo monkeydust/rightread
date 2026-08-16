@@ -199,6 +199,33 @@ export function ItemRow({
           >
             {item.siteName || hostLabel(item.url)} ↗
           </a>
+
+          {/* Where it came from, next to where it came from. The name is stored
+              on the item, so this still reads correctly after you leave the
+              group; the link is dropped once the group itself is gone. */}
+          {item.fromGroupName && (
+            <>
+              <span aria-hidden>·</span>
+              {item.fromGroupId ? (
+                <Link
+                  href={`/groups/${item.fromGroupId}`}
+                  title={`Saved from ${item.fromGroupName}`}
+                  className="hover:underline"
+                  style={{ color: "var(--accent)" }}
+                >
+                  from {item.fromGroupName}
+                </Link>
+              ) : (
+                <span
+                  title={`Saved from ${item.fromGroupName}`}
+                  style={{ color: "var(--accent)" }}
+                >
+                  from {item.fromGroupName}
+                </span>
+              )}
+            </>
+          )}
+
           <span aria-hidden>·</span>
           <time dateTime={new Date(item.savedAt).toISOString()}>
             {savedLabel(item.savedAt)}

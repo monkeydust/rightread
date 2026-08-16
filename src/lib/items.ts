@@ -20,6 +20,8 @@ const LIST_FIELDS = {
   position: true,
   progress: true,
   recommended: true,
+  fromGroupId: true,
+  fromGroupName: true,
   savedAt: true,
 } as const;
 
@@ -42,6 +44,10 @@ export type ListItem = {
   position: number;
   progress: number;
   recommended: boolean;
+  /** Set when this was saved off a group's shelf. Provenance for the list chip. */
+  fromGroupId: string | null;
+  /** Kept beside the id so the chip survives leaving or deleting the group. */
+  fromGroupName: string | null;
   savedAt: Date;
 };
 

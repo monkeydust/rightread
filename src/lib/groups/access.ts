@@ -189,7 +189,14 @@ export async function resolveShare(userId: string, shareId: string) {
     // sharedByUserId so a save can seed itself from the sharer's own extracted
     // copy — the only way a paywalled page they captured by hand is readable
     // for anyone else.
-    select: { id: true, groupId: true, url: true, title: true, sharedByUserId: true },
+    select: {
+      id: true,
+      groupId: true,
+      url: true,
+      title: true,
+      sharedByUserId: true,
+      group: { select: { name: true } },
+    },
   });
   if (!share) throw new NotAMember();
   await requireMember(userId, share.groupId);

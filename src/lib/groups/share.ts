@@ -217,6 +217,15 @@ export async function saveShare(userId: string, shareId: string) {
     adopted = await adoptSharedArticle(item.id, { ...source, url: share.url });
   }
 
+  // Where it came from, shown as a chip in the queue. Set even when the URL was
+  // already in their library: they have just taken it off a shelf, and that is
+  // the more useful thing to know about it. Same reasoning as `recommended` on
+  // the candidates save route.
+  await prisma.item.update({
+    where: { id: item.id },
+    data: { fromGroupId: share.groupId, fromGroupName: share.group?.name ?? null },
+  });
+
   return { item, alreadySaved, adopted, groupId: share.groupId };
 }
 
