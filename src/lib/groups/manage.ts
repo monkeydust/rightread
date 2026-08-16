@@ -9,6 +9,7 @@
 
 import { prisma } from "@/lib/db";
 import { normalizeEmail, isEmailAllowed } from "@/lib/allowlist";
+import { sendGroupInviteEmail } from "@/lib/email";
 import { publishToAll } from "@/lib/events";
 import { memberIdsOf, requireMember } from "./access";
 import { normalizeGroupName } from "./rules";
@@ -93,17 +94,50 @@ export async function inviteToGroup(
   const email = normalizeEmail(rawEmail);
   if (!email) throw new InvalidEmail();
 
+  // Bound after the guard so the narrowing survives into `notify` below: that
+  // is a hoisted declaration, and TypeScript will not assume it runs after this
+  // point.
+  const recipient: string = email;
+
   const canSignIn = isEmailAllowed(email);
-  const existing = await prisma.user.findUnique({
-    where: { email },
-    select: { id: true },
-  });
+  const [existing, group, inviter] = await Promise.all([
+    prisma.user.findUnique({ where: { email }, select: { id: true } }),
+    prisma.group.findUnique({ where: { id: groupId }, select: { name: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: { email: true } }),
+  ]);
+
+  /**
+   * Tells them, but only when there is something they can act on.
+   *
+   * Somebody with an account, or on the allow list, can do something with this
+   * mail. Somebody who is neither would be sent a sign-in link that is going to
+   * refuse them — confusing for them, and it would let any member make the
+   * server mail arbitrary addresses on the operator's Resend reputation. The
+   * invite is still recorded either way; it simply waits quietly.
+   */
+  async function notify(hasAccount: boolean) {
+    if (!hasAccount && !canSignIn) {
+      console.log(
+        `[groups] not mailing ${recipient}: no account and not on the allow list, ` +
+          `so the invite waits until they are added to RIGHTREAD_ALLOWED_EMAILS`
+      );
+      return;
+    }
+    await sendGroupInviteEmail(recipient, {
+      groupName: group?.name ?? "a group",
+      invitedBy: inviter?.email ?? "Someone",
+      groupId,
+      hasAccount,
+    });
+  }
 
   if (existing) {
     const already = await prisma.memberOf.findUnique({
       where: { groupId_userId: { groupId, userId: existing.id } },
       select: { id: true },
     });
+    // No mail for someone who is already here — re-inviting by accident should
+    // not send them anything.
     if (already) return { status: "already-member", email, canSignIn };
 
     await prisma.memberOf.create({ data: { groupId, userId: existing.id } });
@@ -112,6 +146,7 @@ export async function inviteToGroup(
       cause: "membership",
       groupId,
     });
+    await notify(true);
     return { status: "joined", email, canSignIn };
   }
 
@@ -120,6 +155,7 @@ export async function inviteToGroup(
     create: { groupId, email, invitedBy: userId },
     update: {},
   });
+  await notify(false);
   return { status: "invited", email, canSignIn };
 }
 

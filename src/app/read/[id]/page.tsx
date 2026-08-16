@@ -5,6 +5,7 @@ import { getItem } from "@/lib/items";
 import { hostLabel } from "@/lib/url";
 import { readingMinutes } from "@/lib/extract";
 import { ReaderControls } from "@/components/ReaderControls";
+import { ShareToGroup } from "@/components/ShareToGroup";
 import { Recommendations } from "@/components/Recommendations";
 
 export const dynamic = "force-dynamic";
@@ -61,6 +62,7 @@ export default async function ReadPage(props: PageProps<"/read/[id]">) {
             >
               Original ↗
             </a>
+            <ShareToGroup url={item.url} title={item.title} />
             <ReaderControls
               itemId={item.id}
               title={item.title}
