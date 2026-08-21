@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { netFetch } from "@/lib/connectivity";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ShelfItem } from "@/lib/groups/access";
@@ -41,10 +42,18 @@ export function GroupShelf({
   // explicitly, and the live event below covers everyone else's. Mirroring the
   // prop as well would be a second source of truth for the same list.
   const refetch = useCallback(async () => {
-    const response = await fetch(`/api/groups/${groupId}/shares`, { cache: "no-store" });
-    if (!response.ok) return;
-    const body = await response.json();
-    setShares(body.shares ?? []);
+    // Called from an event listener as a floating promise, so a rejection here
+    // was an unhandled one on every failure.
+    try {
+      const response = await netFetch(`/api/groups/${groupId}/shares`, {
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const body = await response.json();
+      setShares(body.shares ?? []);
+    } catch {
+      // Keep what is on screen; a group shelf is never cached offline anyway.
+    }
   }, [groupId]);
 
   // Someone else sharing into this group should land without a reload. The

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { signOut } from "@/auth";
 import { Wordmark } from "@/components/Wordmark";
+import { OfflineDot } from "@/components/OfflineDot";
 
 type Props = {
   active: "queue" | "archive" | "graph" | "discover" | "groups";
@@ -80,6 +81,9 @@ export function AppShell({
               box around the inline-block button, reserving descender space
               below it and pushing "Sign out" off the line "Settings" sits on. */}
           <div className="flex items-center gap-1">
+            {/* Renders nothing while online, so this costs no space in the
+                common case and never moves the controls beside it. */}
+            <OfflineDot />
             <Link
               href="/settings"
               className={headerAction}

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { listItems, countByStatus } from "@/lib/items";
+import { listItems, countByStatus, allItemIds } from "@/lib/items";
 import { countDiscover } from "@/lib/recommendations";
 import { AppShell } from "@/components/AppShell";
 import { Library } from "@/components/Library";
@@ -11,15 +11,21 @@ export default async function ArchivePage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
 
-  const [items, counts, discoverCount] = await Promise.all([
+  const [items, counts, discoverCount, precacheIds] = await Promise.all([
     listItems(session.user.id, "archived"),
     countByStatus(session.user.id),
     countDiscover(session.user.id),
+    allItemIds(session.user.id),
   ]);
 
   return (
     <AppShell active="archive" counts={counts} discoverCount={discoverCount}>
-      <Library key="archived" initialItems={items} status="archived" />
+      <Library
+        key="archived"
+        initialItems={items}
+        status="archived"
+        precacheIds={precacheIds}
+      />
     </AppShell>
   );
 }

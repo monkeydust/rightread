@@ -142,9 +142,12 @@ function SectionHeading({
 export function SearchResults({
   results,
   loading,
+  offline = false,
 }: {
   results: SearchPayload | null;
   loading: boolean;
+  /** Results came from the list in memory, not the server. Changes what we may claim. */
+  offline?: boolean;
 }) {
   if (!results) {
     return loading ? (
@@ -165,12 +168,34 @@ export function SearchResults({
 
   return (
     <div style={{ opacity: loading ? 0.6 : 1, transition: "opacity 120ms" }}>
+      {/* Offline this searched titles, sites and excerpts held in memory — not
+          article text, and not by meaning. Saying so is the difference between
+          a useful degraded answer and a wrong one. */}
+      {offline && (
+        <p
+          className="px-4 pt-3 text-[13px]"
+          style={{ color: "var(--text-muted)" }}
+        >
+          Offline — searching titles and summaries only.
+        </p>
+      )}
+
       {nothing && (
         <p
           className="px-4 py-12 text-center text-sm"
           style={{ color: "var(--text-muted)" }}
         >
-          Nothing matches <strong>{results.query}</strong> — by words or by meaning.
+          {offline ? (
+            <>
+              Nothing in your titles or summaries matches{" "}
+              <strong>{results.query}</strong>.
+            </>
+          ) : (
+            <>
+              Nothing matches <strong>{results.query}</strong> — by words or by
+              meaning.
+            </>
+          )}
         </p>
       )}
 

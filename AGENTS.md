@@ -44,6 +44,35 @@ polluted by machine-fetched articles, and saving a recommendation goes
 through the normal capture flow. The reader shows the panel only when
 something clears the measured similarity floor shared with semantic search.
 
+## Offline
+The app is meant to be read on a plane, so offline is a first-class mode, not a
+degraded one. Three rules, each of which was learned the hard way:
+
+- **`VERSION` and `DATA_VERSION` in `public/sw.js` are not the same thing.**
+  `VERSION` covers the shell and static assets and must be bumped on any markup
+  or styling change, or cached HTML ends up pointing at deleted chunks.
+  `DATA_VERSION` covers downloaded articles and must be bumped **only** if what
+  is stored per article changes shape. They used to share one constant, which
+  meant every deploy deleted every reader's offline library — a CSS tweak
+  throwing away the megabyte someone downloaded precisely so they could read it
+  without a network.
+- **Every network call must be able to give up.** Aeroplane wi-fi associates
+  without routing, so `navigator.onLine` is true and requests are accepted and
+  then black-holed: a bare `fetch` neither resolves nor rejects, and anything
+  awaiting it wedges for ever. Use `timedFetch` in the worker and `netFetch`
+  from `src/lib/connectivity.ts` on the client; never a bare `fetch`.
+- **Offline is a state, not an error.** Changes are queued in
+  `src/lib/outbox.ts` and replayed on reconnect, so a star or a Done applies at
+  once and lands later. Only *absolute, idempotent* operations may be queued —
+  `starred`, `status`, `kind`, `progress`, delete, and captured URLs. Reorder
+  is `{move: "up"}`, which is relative and resolved server-side against live
+  position floats, so it cannot be replayed and stays online-only.
+
+Reachability is exposed by `src/lib/connectivity.ts` (the browser flag plus what
+actually happened to recent requests) and shown as a small dot in the header.
+Search degrades offline to a title-and-excerpt filter over the list in memory,
+and says so — article bodies never reach the client.
+
 ## Groups
 A shared shelf (`src/lib/groups/`). Every other model is owned by one user and
 read with `where: { userId }`, checked inline at each call site. Groups are the

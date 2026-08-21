@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { netFetch, isNetworkError } from "@/lib/connectivity";
+import { enqueue } from "@/lib/outbox";
 import { CopyArticle } from "@/components/CopyArticle";
 
 type Theme = "light" | "sepia" | "dark";
@@ -30,18 +32,47 @@ export function ReaderControls({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  /** Transient feedback for the Done button, which otherwise has nowhere to speak. */
+  const [note, setNote] = useState<string | null>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
 
   useReadingProgress(itemId, initialProgress);
 
+  /*
+   * Mark read, or send back to the queue.
+   *
+   * This had no catch and no ok check. Offline the await simply rejected, so
+   * the navigation below never ran and the button did *nothing at all* — no
+   * message, no movement — which is the worst possible response to the most
+   * natural thing to do at the end of an article you just read on a plane.
+   */
   async function toggleArchive() {
-    await fetch(`/api/items/${itemId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: archived ? "unread" : "archived" }),
-    });
-    router.push("/");
-    router.refresh();
+    setNote(null);
+    try {
+      const res = await netFetch(`/api/items/${itemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: archived ? "unread" : "archived" }),
+      });
+      if (!res.ok) throw new Error("Could not save that");
+      router.push("/");
+      router.refresh();
+    } catch (err) {
+      if (isNetworkError(err)) {
+        // Queue it and go, exactly as if it had worked — because as far as the
+        // reader is concerned it has. Finishing an article on a plane and
+        // filing it is the whole reason to read offline.
+        await enqueue({
+          kind: "patch-item",
+          itemId,
+          body: { status: archived ? "unread" : "archived" },
+        });
+        router.push("/");
+        return;
+      }
+      // A server refusal is different: stay put rather than imply it was filed.
+      setNote("Couldn't save that");
+    }
   }
 
   return (
@@ -73,8 +104,9 @@ export function ReaderControls({
         onClick={() => void toggleArchive()}
         className="rounded-md px-3 py-1.5 text-[13px] font-medium hover:bg-[var(--bg-subtle)]"
         style={{ color: "var(--text-muted)" }}
+        title={note ?? undefined}
       >
-        {archived ? "Requeue" : "Done"}
+        {note ?? (archived ? "Requeue" : "Done")}
       </button>
     </div>
   );

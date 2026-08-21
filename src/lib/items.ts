@@ -67,6 +67,25 @@ export async function getItem(userId: string, id: string) {
   return prisma.item.findFirst({ where: { id, userId } });
 }
 
+/**
+ * Every item id, unread first, for the offline precache.
+ *
+ * Unread before archived because the precache is capped: if a library is large
+ * enough to be truncated, the things still to read are the ones worth having on
+ * a plane. Ids only — this is a list of what to download, not the download.
+ */
+export async function allItemIds(userId: string): Promise<string[]> {
+  const rows = await prisma.item.findMany({
+    where: { userId },
+    orderBy: [{ position: "asc" }, { savedAt: "desc" }],
+    select: { id: true, status: true },
+  });
+  return [
+    ...rows.filter((r) => r.status === "unread"),
+    ...rows.filter((r) => r.status !== "unread"),
+  ].map((r) => r.id);
+}
+
 export async function countByStatus(userId: string) {
   const [unread, archived] = await Promise.all([
     prisma.item.count({ where: { userId, status: "unread" } }),

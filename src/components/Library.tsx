@@ -1,7 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { ListItem } from "@/lib/items";
+import {
+  netFetch,
+  isOnline,
+  isNetworkError,
+  subscribeConnectivity,
+} from "@/lib/connectivity";
+import { enqueue, applyLocally } from "@/lib/outbox";
 import { ItemRow } from "@/components/ItemRow";
 import { OmniBar } from "@/components/OmniBar";
 import { SearchResults, type SearchPayload } from "@/components/SearchResults";
@@ -10,19 +24,74 @@ import { useOfflinePrecache } from "@/components/useOfflinePrecache";
 type Props = {
   initialItems: ListItem[];
   status: "unread" | "archived";
+  /**
+   * Every item in the library, unread first — not just this page's.
+   * See the note in useOfflinePrecache: the set is pruned to what it is given.
+   */
+  precacheIds: string[];
 };
 
-export function Library({ initialItems, status }: Props) {
+/**
+ * Search over what the browser already holds.
+ *
+ * Offline the real search is unreachable — it is FTS5 and embeddings, both
+ * server-side — and the box used to sit on "Searching…" for ever. This is the
+ * honest substitute: the list in memory carries title, site and excerpt, so
+ * those can be matched here. Article bodies never reach the client, so this
+ * cannot pretend to be full-text, and the results header says so.
+ */
+function localSearch(items: ListItem[], term: string): SearchPayload {
+  const needle = term.trim().toLowerCase();
+  const exact = items
+    .filter((i) =>
+      [i.title, i.excerpt, i.siteName].some((field) =>
+        field?.toLowerCase().includes(needle)
+      )
+    )
+    .map((i) => ({
+      id: i.id,
+      url: i.url,
+      title: i.title,
+      siteName: i.siteName,
+      kind: i.kind,
+      status: i.status,
+      savedAt: new Date(i.savedAt).toISOString(),
+      wordCount: i.wordCount,
+      snippet: i.excerpt,
+    }));
+
+  return {
+    query: term,
+    hasWildcard: false,
+    exact,
+    semantic: [],
+    // Not "unavailable" as an error — offline it is genuinely just absent, and
+    // the panel already knows how to say nothing rather than complain.
+    semanticStatus: "skipped",
+    tookMs: 0,
+  };
+}
+
+/**
+ * Fields whose value is absolute, and so safe to queue and replay later.
+ *
+ * `retry` is absent on purpose: it asks the server to go and fetch a page, which
+ * is the one thing that cannot be done from a queue, and replaying it an hour
+ * later against an item that has since extracted would be pointless work.
+ * `move` is absent because it is relative — see the note in lib/outbox.ts.
+ */
+const QUEUEABLE = new Set(["starred", "status", "kind", "progress"]);
+
+export function Library({ initialItems, status, precacheIds }: Props) {
   // Callers pass key={status}, so switching tabs remounts this with the right
   // server data rather than syncing props into state.
   const [items, setItems] = useState(initialItems);
 
-  // Only the unread queue — the archive is what you have finished with, and
-  // spending someone's data to pull it down would be backwards.
-  useOfflinePrecache(
-    items.map((item) => item.id),
-    status === "unread"
-  );
+  // The whole library, from either page. The archive used to be excluded on the
+  // grounds that it is what you have finished with — but "finished with" is not
+  // the same as "never want to look at again", and excluding it meant a plane
+  // journey could not reach a single archived article.
+  useOfflinePrecache(precacheIds, true);
 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -39,11 +108,22 @@ export function Library({ initialItems, status }: Props) {
     payload: SearchPayload;
   } | null>(null);
 
+  // Reachability, so the doomed requests below can simply not be made.
+  const online = useSyncExternalStore(subscribeConnectivity, isOnline, () => true);
+
   const refresh = useCallback(async () => {
-    const res = await fetch(`/api/items?status=${status}`, { cache: "no-store" });
-    if (!res.ok) return;
-    const data = await res.json();
-    setItems(data.items);
+    // Had no catch at all, and is called as `void refresh()` from the stream
+    // listener and the poller — so every failure offline was an unhandled
+    // rejection, several times a minute.
+    try {
+      const res = await netFetch(`/api/items?status=${status}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setItems(data.items);
+    } catch {
+      // Nothing to say: the list on screen is still the best copy we have, and
+      // the indicator in the header already reports the connection.
+    }
   }, [status]);
 
   // ── Live updates ────────────────────────────────────────────────
@@ -54,6 +134,13 @@ export function Library({ initialItems, status }: Props) {
 
   useEffect(() => {
     if (typeof EventSource === "undefined") return;
+    // Offline an EventSource reconnects roughly every 3s for the life of the
+    // tab, and on a network that stalls rather than refuses each attempt holds
+    // a socket for the OS timeout. Twenty of those exhaust the per-origin
+    // connection pool, at which point even a request the cache could answer
+    // queues behind dead sockets — which is a large part of why the app
+    // appeared frozen rather than merely offline.
+    if (!online) return;
 
     const source = new EventSource("/api/events");
     source.onopen = () => setLiveConnected(true);
@@ -68,7 +155,7 @@ export function Library({ initialItems, status }: Props) {
       setLiveConnected(false);
       source.close();
     };
-  }, [refresh]);
+  }, [refresh, online]);
 
   // Polling fallback, only while the stream is down. A proxy that buffers, a
   // service worker that intercepts, or a browser without EventSource would
@@ -78,29 +165,72 @@ export function Library({ initialItems, status }: Props) {
     (i) => i.extractStatus === "pending" || i.kindSource === "none"
   );
 
+  /*
+   * The 90s bound, kept outside the effect.
+   *
+   * It used to be computed inside, so every re-run started a fresh 90 seconds
+   * — and `liveConnected` flips false on every stream error, which offline is
+   * about every 3 seconds. The "bounded" fallback was therefore unbounded
+   * exactly when it was doing the most damage: a request every 2s for as long
+   * as the tab stayed open.
+   */
+  const pollDeadline = useRef<number | null>(null);
+
+  // Cleared when the queue stops settling, so the next burst of background work
+  // gets a fresh 90 seconds. In an effect because a ref must not be written
+  // during render.
+  useEffect(() => {
+    if (!settling) pollDeadline.current = null;
+  }, [settling]);
+
   useEffect(() => {
     if (liveConnected || !settling) return;
+    // No point polling a server we cannot reach; the stream will resume and
+    // refresh once the connection is back.
+    if (!online) return;
 
-    // Bounded on purpose. A classification that never resolves — no API key,
-    // an upstream outage — leaves kindSource "none" permanently, and an
-    // unbounded interval would then poll for the entire life of the tab.
-    const deadline = Date.now() + 90_000;
+    if (pollDeadline.current === null) pollDeadline.current = Date.now() + 90_000;
     const id = setInterval(() => {
-      if (Date.now() > deadline) {
+      if (pollDeadline.current !== null && Date.now() > pollDeadline.current) {
         clearInterval(id);
         return;
       }
       void refresh();
     }, 2000);
     return () => clearInterval(id);
-  }, [liveConnected, settling, refresh]);
+  }, [liveConnected, settling, refresh, online]);
 
   const mutate = useCallback(
     async (id: string, body: Record<string, unknown>) => {
       setBusyId(id);
       setError(null);
+
+      const queueable = Object.keys(body).every((k) => QUEUEABLE.has(k));
+
+      /**
+       * Take the change now and send it later.
+       *
+       * The row updates immediately, which is the point: a star that does
+       * nothing until you land is indistinguishable from a broken button.
+       */
+      const queueIt = async () => {
+        const op = { kind: "patch-item" as const, itemId: id, body };
+        setItems((current) => applyLocally(current, op));
+        await enqueue(op);
+      };
+
+      if (!online) {
+        if (queueable) await queueIt();
+        else
+          setError(
+            "That needs a connection — it'll work again when you're back online."
+          );
+        setBusyId(null);
+        return;
+      }
+
       try {
-        const res = await fetch(`/api/items/${id}`, {
+        const res = await netFetch(`/api/items/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -111,12 +241,24 @@ export function Library({ initialItems, status }: Props) {
         }
         await refresh();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Something went wrong");
+        // Went offline mid-request. Same treatment as having been offline all
+        // along — the browser's own "Failed to fetch" tells a reader nothing.
+        if (isNetworkError(err) && queueable) {
+          await queueIt();
+        } else {
+          setError(
+            isNetworkError(err)
+              ? "You're offline — that one needs a connection."
+              : err instanceof Error
+                ? err.message
+                : "Something went wrong"
+          );
+        }
       } finally {
         setBusyId(null);
       }
     },
-    [refresh]
+    [refresh, online]
   );
 
   const handleDelete = useCallback(
@@ -126,23 +268,51 @@ export function Library({ initialItems, status }: Props) {
       const previous = items;
       setItems((current) => current.filter((i) => i.id !== id));
       try {
-        const res = await fetch(`/api/items/${id}`, { method: "DELETE" });
+        if (!online) {
+          // Already removed from the list above; record it and stop.
+          await enqueue({ kind: "delete-item", itemId: id });
+          return;
+        }
+        const res = await netFetch(`/api/items/${id}`, { method: "DELETE" });
         if (!res.ok) throw new Error("Could not delete");
       } catch (err) {
+        if (isNetworkError(err)) {
+          await enqueue({ kind: "delete-item", itemId: id });
+          return;
+        }
         setItems(previous);
         setError(err instanceof Error ? err.message : "Could not delete");
       } finally {
         setBusyId(null);
       }
     },
-    [items]
+    [items, online]
   );
 
-  const current = results?.term === searchTerm ? results.payload : null;
+  /*
+   * The results to show.
+   *
+   * Offline this is *derived* rather than fetched-and-stored: the list is
+   * already in memory, so a local match is a pure function of it, and deriving
+   * avoids both a pointless request and a synchronous setState in an effect.
+   * It also means `searching` can never be stuck true offline — which is what
+   * left the box reading "Searching…" for ever.
+   */
+  const current = useMemo(() => {
+    if (!searchTerm) return null;
+    if (!online) return localSearch(items, searchTerm);
+    return results?.term === searchTerm ? results.payload : null;
+  }, [searchTerm, online, items, results]);
+
   const searching = searchTerm !== "" && current === null;
 
   useEffect(() => {
     if (!searchTerm) return;
+
+    // Offline there is nothing to request; the answer is derived below from the
+    // list already in memory.
+    if (!online) return;
+
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       const q = encodeURIComponent(searchTerm);
@@ -190,7 +360,33 @@ export function Library({ initialItems, status }: Props) {
         );
       } catch (err) {
         // An abort is the expected outcome of typing another character.
-        if ((err as Error)?.name !== "AbortError") setError("Search failed");
+        if ((err as Error)?.name === "AbortError") return;
+
+        /*
+         * Resolve into a result, always.
+         *
+         * This used to set an error and stop, leaving `results` null — and
+         * because `searching` is derived as "a term with no results yet", the
+         * panel then rendered "Searching…" for ever, underneath a red "Search
+         * failed". Two contradictory statements, neither of which ever
+         * resolved, and the only escape was emptying the box.
+         */
+        if (isNetworkError(err)) {
+          setResults({ term: searchTerm, payload: localSearch(items, searchTerm) });
+        } else {
+          setError("Search failed");
+          setResults({
+            term: searchTerm,
+            payload: {
+              query: searchTerm,
+              hasWildcard: false,
+              exact: [],
+              semantic: [],
+              semanticStatus: "unavailable",
+              tookMs: 0,
+            },
+          });
+        }
       }
     }, 220);
 
@@ -198,7 +394,7 @@ export function Library({ initialItems, status }: Props) {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [searchTerm]);
+  }, [searchTerm, online, items]);
 
   const starredCount = useMemo(
     () => items.filter((i) => i.starred).length,
@@ -236,7 +432,7 @@ export function Library({ initialItems, status }: Props) {
       )}
 
       {searchTerm ? (
-        <SearchResults results={current} loading={searching} />
+        <SearchResults results={current} loading={searching} offline={!online} />
       ) : filtered.length === 0 ? (
         <p
           className="px-4 py-16 text-center text-sm"

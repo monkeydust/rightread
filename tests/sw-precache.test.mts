@@ -70,10 +70,26 @@ function loadWorker(responses: Record<string, Opts> = {}) {
   const cacheStore = makeCaches();
   // Flipped mid-test to model the actual scenario: precache while there is a
   // network, then read with none at all.
-  const net = { offline: false };
+  //
+  // `stalls` is the aeroplane case and the one that matters: wi-fi associated,
+  // navigator.onLine true, connection accepted and then black-holed. The fetch
+  // does not fail — it never answers at all. Before timedFetch this wedged the
+  // worker permanently; a test that only models `offline` would miss it,
+  // because rejecting fast was never the broken path.
+  const net = { offline: false, stalls: false };
 
-  const fetchStub = async (t: unknown, init?: { headers?: Record<string, string> }) => {
+  const fetchStub = async (
+    t: unknown,
+    init?: { headers?: Record<string, string>; signal?: AbortSignal }
+  ) => {
     const path = keyOf(t);
+    if (net.stalls) {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("The operation was aborted.", "AbortError"))
+        );
+      });
+    }
     if (net.offline) throw new TypeError("Failed to fetch");
     // Flight-payload fetches are recorded distinctly from document fetches so
     // a test can tell which of the two the worker actually asked for.
@@ -110,6 +126,13 @@ function loadWorker(responses: Record<string, Opts> = {}) {
     Promise,
     Array,
     console,
+    // timedFetch needs all three. A vm context gets its own ECMAScript
+    // intrinsics but no host APIs, so these have to be handed in explicitly or
+    // every fetch branch throws ReferenceError the moment it runs.
+    AbortController,
+    DOMException,
+    setTimeout,
+    clearTimeout,
   };
 
   const context = createContext(sandbox);
@@ -381,6 +404,93 @@ function documentsOf(cacheStore: ReturnType<typeof makeCaches>) {
     JSON.stringify(cached)
   );
   check("the surviving article keeps both", cached.length === 2, JSON.stringify(cached));
+}
+
+
+// ── The aeroplane: a network that stalls rather than fails ────────
+// This is the case that made the app unusable in flight, and the reason
+// timedFetch exists. Wi-fi is associated so the browser believes it is online,
+// the connection is accepted, and then nothing comes back — ever. Every branch
+// here awaits the network before falling back, so without a deadline the
+// promise handed to respondWith never settles: the tap produces nothing at all
+// and the cached article sits there unreachable. Modelling only `offline`
+// would miss it entirely, because failing fast was never the broken path.
+{
+  const { listeners, cacheStore, net } = loadWorker();
+  await sendMessage(listeners, { type: "PRECACHE_ARTICLES", paths: ["/read/a"] });
+
+  net.stalls = true;
+
+  const tapped = await sendFetch(listeners, "/read/a", { rsc: true });
+  check(
+    "a stalled network still serves the precached payload, at once",
+    tapped !== undefined && !(tapped as { networkError?: boolean }).networkError,
+    JSON.stringify(tapped)
+  );
+
+  const doc = await sendFetch(listeners, "/read/a");
+  check(
+    "and the precached document too",
+    doc !== undefined && !(doc as { networkError?: boolean }).networkError,
+    JSON.stringify(doc)
+  );
+
+  check("nothing was evicted by reading through a stall", precacheOf(cacheStore).length === 2);
+}
+
+// ── A stall for something we do NOT hold must still settle ────────
+// The point is not the answer, it is that there IS one. Anything that resolves
+// lets the router fall back to a full navigation; a pending promise is what
+// left the app frozen.
+{
+  const { listeners, net } = loadWorker();
+  net.stalls = true;
+
+  const settled = await Promise.race([
+    sendFetch(listeners, "/read/never-seen", { rsc: true }).then(() => "settled"),
+    new Promise((r) => setTimeout(() => r("HUNG"), 15_000)),
+  ]);
+  check("an uncached article gives up instead of hanging", settled === "settled", String(settled));
+}
+
+
+
+// ── Articles survive the deploy that splits the versions ──────────
+// The fix that stops articles being deleted must not delete them on its way
+// in. Anything downloaded under the old single-version scheme is adopted into
+// the new data-versioned caches before the stale ones are pruned.
+{
+  const { listeners, cacheStore } = loadWorker();
+
+  // Seed what an already-installed worker would be holding.
+  const legacyPre = await cacheStore.open("rr-precache-v21");
+  await legacyPre.put("/read/old", { body: "old article" });
+  await legacyPre.put("/read/old?__rr_rsc=1", { body: "old payload" });
+  const legacyShell = await cacheStore.open("rr-shell-v21");
+  await legacyShell.put("/", { body: "stale markup" });
+
+  await new Promise<void>((resolve) => {
+    listeners.activate({ waitUntil: (p: Promise<unknown>) => void Promise.resolve(p).then(() => resolve()) });
+  });
+
+  const adopted = precacheOf(cacheStore);
+  check(
+    "the downloaded article moved to the new cache",
+    adopted.includes("/read/old") && adopted.includes("/read/old?__rr_rsc=1"),
+    JSON.stringify(adopted)
+  );
+  check(
+    "the old article cache is gone",
+    !cacheStore.stores.has("rr-precache-v21"),
+    JSON.stringify([...cacheStore.stores.keys()])
+  );
+  // Stale markup is still evicted — that is what VERSION is for, and keeping it
+  // would reintroduce the unstyled-article bug the bump exists to prevent.
+  check(
+    "stale shell markup is still dropped",
+    !cacheStore.stores.has("rr-shell-v21"),
+    JSON.stringify([...cacheStore.stores.keys()])
+  );
 }
 
 console.log(failed ? `\n${failed} FAILED` : `\nall passed`);

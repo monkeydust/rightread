@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { listItems, countByStatus } from "@/lib/items";
+import { listItems, countByStatus, allItemIds } from "@/lib/items";
 import { countDiscover } from "@/lib/recommendations";
 import { countGroupShares } from "@/lib/groups/access";
 import { AppShell } from "@/components/AppShell";
@@ -12,11 +12,12 @@ export default async function QueuePage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
 
-  const [items, counts, discoverCount, groupCount] = await Promise.all([
+  const [items, counts, discoverCount, groupCount, precacheIds] = await Promise.all([
     listItems(session.user.id, "unread"),
     countByStatus(session.user.id),
     countDiscover(session.user.id),
     countGroupShares(session.user.id),
+    allItemIds(session.user.id),
   ]);
 
   return (
@@ -26,7 +27,7 @@ export default async function QueuePage() {
       discoverCount={discoverCount}
       groupCount={groupCount}
     >
-      <Library key="unread" initialItems={items} status="unread" />
+      <Library key="unread" initialItems={items} status="unread" precacheIds={precacheIds} />
     </AppShell>
   );
 }

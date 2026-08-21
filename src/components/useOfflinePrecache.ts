@@ -3,14 +3,20 @@
 import { useEffect } from "react";
 
 /**
- * How far down the queue to keep readable without a network.
+ * How much of the library to keep readable without a network.
  *
- * The number is a bandwidth decision, not a storage one: extracted article
- * HTML is a few tens of KB, so twenty of them is trivial on disk but is twenty
- * requests on someone's cellular data. Twenty is about a commute's worth of
- * reading, which is the case this exists for.
+ * This was twenty, on the reasoning that each article is a request on someone's
+ * cellular data. That was the wrong trade and it failed the one case the app
+ * exists for: a plane, with a queue full of things saved and never opened, of
+ * which only the first twenty were actually there — and the archive not at all.
+ *
+ * Measured, an extracted article is ~40 KB of HTML. A whole library of 200 is
+ * therefore about 8 MB, which is a couple of photos. The cap is not a policy
+ * about what is worth keeping; it is a guard so that a library that grows to
+ * thousands does not quietly try to download all of it. Data Saver is still
+ * honoured below, which is the setting that actually means "don't".
  */
-export const OFFLINE_DEPTH = 20;
+export const OFFLINE_DEPTH = 200;
 
 /**
  * Keeps the top of the reading queue readable offline.
@@ -26,6 +32,10 @@ export const OFFLINE_DEPTH = 20;
  * next sync just like a freshly captured one.
  */
 export function useOfflinePrecache(ids: string[], enabled: boolean) {
+  // The worker prunes the precache to exactly the set it is handed, so every
+  // caller must pass the WHOLE library. Handing it one status' ids would make
+  // the archive page evict the queue's articles and the queue page evict the
+  // archive's, each undoing the other on every navigation.
   // The effect depends on the *contents* of the slice, not the array identity,
   // which is rebuilt on every render.
   const key = ids.slice(0, OFFLINE_DEPTH).join(",");

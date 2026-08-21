@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ServiceWorker } from "@/components/ServiceWorker";
+import { OutboxSync } from "@/components/OutboxSync";
 import { serif, sans } from "./fonts";
 
 export const metadata: Metadata = {
@@ -58,6 +59,9 @@ export default function RootLayout({
       <body>
         {children}
         <ServiceWorker />
+        {/* Not inside AppShell: the reader has its own chrome, and marking an
+            article read is the likeliest thing to have been queued. */}
+        <OutboxSync />
       </body>
     </html>
   );

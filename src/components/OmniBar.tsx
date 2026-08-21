@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { classifyInput, extractFirstUrl } from "@/lib/url";
+import { netFetch, isNetworkError } from "@/lib/connectivity";
+import { enqueue } from "@/lib/outbox";
 import { Star } from "@/components/icons";
 
 /**
@@ -70,7 +72,7 @@ export function OmniBar({
     setSaving(true);
     setMessage(null);
     try {
-      const res = await fetch("/api/items", {
+      const res = await netFetch("/api/items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: target }),
@@ -85,7 +87,24 @@ export function OmniBar({
       setTimeout(() => setMessage(null), 2500);
       await onSaved();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not save that link");
+      /*
+       * Offline, keep the link rather than losing it.
+       *
+       * The article itself cannot be fetched without a network — extraction is
+       * a server-side fetch of the page — but the URL is the part that is hard
+       * to get back. A capture box that refuses a link is a capture box that
+       * loses a thought, which is the one thing it exists not to do; the item
+       * appears, already extracting, when the connection returns.
+       */
+      if (isNetworkError(err)) {
+        await enqueue({ kind: "capture", url: target });
+        setValue("");
+        setSearchAnyway(false);
+        setMessage("Saved here — it'll be fetched when you're back online");
+        setTimeout(() => setMessage(null), 3500);
+      } else {
+        setMessage(err instanceof Error ? err.message : "Could not save that link");
+      }
     } finally {
       inFlight.current = false;
       setSaving(false);

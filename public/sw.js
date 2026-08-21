@@ -16,10 +16,24 @@
 
 // Bump on any change to styling or markup: cached article HTML references
 // hashed CSS/font URLs, and stale HTML pointing at deleted chunks renders
-// unstyled. Activation deletes every cache not matching this suffix.
-const VERSION = "v21";
+// unstyled. Activation deletes every shell/asset cache not matching this.
+const VERSION = "v22";
+
+/*
+ * Downloaded articles are versioned SEPARATELY, and this is the whole point.
+ *
+ * They used to share VERSION, which meant every deploy — every styling tweak —
+ * deleted the reader's offline library, because activation drops any cache not
+ * matching the current suffix. That is precisely backwards: a CSS change is the
+ * cheapest possible reason to throw away the megabyte someone downloaded
+ * specifically so they could read it on a plane.
+ *
+ * Bump this ONLY if what is stored changes shape — a different cache key, a
+ * different set of things stored per article. Never for a UI change.
+ */
+const DATA_VERSION = "d1";
 const SHELL_CACHE = `rr-shell-${VERSION}`;
-const ARTICLE_CACHE = `rr-articles-${VERSION}`;
+const ARTICLE_CACHE = `rr-articles-${DATA_VERSION}`;
 const ASSET_CACHE = `rr-assets-${VERSION}`;
 
 /*
@@ -31,7 +45,7 @@ const ASSET_CACHE = `rr-assets-${VERSION}`;
  * until you sign out. Merging them would mean a reorder silently evicting
  * something you had already read.
  */
-const PRECACHE = `rr-precache-${VERSION}`;
+const PRECACHE = `rr-precache-${DATA_VERSION}`;
 
 const OFFLINE_URL = "/offline";
 
@@ -44,14 +58,48 @@ self.addEventListener("install", (event) => {
   );
 });
 
+/*
+ * Carry already-downloaded articles across the version split.
+ *
+ * Without this, the very deploy that stops articles being deleted would delete
+ * them one last time: they live under the old VERSION suffix, which no longer
+ * matches either live name. Copying them over first means nobody has to
+ * re-download a library to gain the fix that stops it being thrown away.
+ *
+ * A no-op on every subsequent boot, since the old caches are gone by then.
+ */
+async function adoptLegacyArticleCaches() {
+  const keys = await caches.keys();
+  const legacy = keys.filter(
+    (key) => /^rr-(articles|precache)-/.test(key) && key !== ARTICLE_CACHE && key !== PRECACHE
+  );
+  for (const key of legacy) {
+    try {
+      const from = await caches.open(key);
+      const to = await caches.open(key.startsWith("rr-articles") ? ARTICLE_CACHE : PRECACHE);
+      for (const request of await from.keys()) {
+        // Never overwrite something already stored under the new name: a fresh
+        // copy beats a carried-over one.
+        if (await to.match(request)) continue;
+        const response = await from.match(request);
+        if (response) await to.put(request, response);
+      }
+    } catch {
+      // A failed migration costs a re-download, not correctness.
+    }
+  }
+}
+
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches
-      .keys()
+    adoptLegacyArticleCaches()
+      .then(() => caches.keys())
       .then((keys) =>
         Promise.all(
           keys
-            .filter((key) => !key.endsWith(VERSION))
+            // Two live suffixes now. A cache is stale only if it matches
+            // neither — otherwise a deploy would take the articles with it.
+            .filter((key) => !key.endsWith(VERSION) && !key.endsWith(DATA_VERSION))
             .map((key) => caches.delete(key))
         )
       )
@@ -87,6 +135,52 @@ function rscKey(url) {
   return `${url.pathname}?__rr_rsc=1`;
 }
 
+/*
+ * A fetch that is guaranteed to settle.
+ *
+ * This is the fix for the bug that made the app unusable on a plane. Aeroplane
+ * wi-fi associates, so navigator.onLine is true and the browser believes it is
+ * online, but nothing routes: the TCP connection is accepted and then
+ * black-holed. A bare fetch() in that state neither resolves NOR rejects for
+ * the OS timeout, which can run to minutes. Every caller below awaits the
+ * network before falling back, so an unsettled fetch means respondWith never
+ * settles, the tap produces nothing at all, and the router never gets the
+ * failure it needs to try a plain navigation. The cached article sits there,
+ * perfectly readable, behind a promise that never comes back.
+ *
+ * Five seconds is far longer than a working request needs and far shorter than
+ * a person will wait before deciding the app is broken.
+ */
+const NETWORK_TIMEOUT_MS = 5000;
+
+function timedFetch(request) {
+  // AbortSignal.timeout would be neater but is not in every browser that runs
+  // this worker; a controller plus a timer is available everywhere.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS);
+  return fetch(request, { signal: controller.signal }).finally(() =>
+    clearTimeout(timer)
+  );
+}
+
+/**
+ * Whether this is the router speculatively warming a link rather than a real
+ * navigation.
+ *
+ * It matters because a prefetch answer is not always the whole page, and it
+ * would be stored under the same key precacheOne uses — so a speculative,
+ * content-free payload can shadow the complete one downloaded for offline use.
+ * Prefetches are served from cache like anything else; they are just never
+ * allowed to WRITE.
+ */
+function isPrefetch(request) {
+  return (
+    request.headers.get("Next-Router-Prefetch") === "1" ||
+    request.headers.get("Purpose") === "prefetch" ||
+    request.headers.get("Sec-Purpose") === "prefetch"
+  );
+}
+
 function isNeverCached(url) {
   return (
     url.pathname.startsWith("/api/") ||
@@ -114,7 +208,18 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
-  if (isNeverCached(url)) return;
+  if (isNeverCached(url)) {
+    // Still never stored — these are API calls and other people's data. But a
+    // NAVIGATION to one, offline, used to fall through to the browser's own
+    // error page, which looks like the app is broken rather than like the
+    // network is. Answer with the offline page instead; nothing is written.
+    if (request.mode === "navigate") {
+      event.respondWith(
+        timedFetch(request).catch(() => caches.match(OFFLINE_URL))
+      );
+    }
+    return;
+  }
 
   // The flight payload for an article, i.e. a tap on the queue. Same
   // stale-while-revalidate shape as the document below, keyed on the path.
@@ -126,9 +231,14 @@ self.addEventListener("fetch", (event) => {
         const precache = await caches.open(PRECACHE);
         const cached = (await articles.match(key)) ?? (await precache.match(key));
 
-        const network = fetch(request)
+        const network = timedFetch(request)
           .then((response) => {
-            if (response.ok && response.type === "basic" && !response.redirected) {
+            if (
+              response.ok &&
+              response.type === "basic" &&
+              !response.redirected &&
+              !isPrefetch(request)
+            ) {
               articles.put(key, response.clone());
             }
             return response;
@@ -150,6 +260,48 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  /*
+   * The flight payload for an ordinary app route — the queue, the archive.
+   *
+   * These matched nothing at all and fell off the end of this listener, so
+   * offline they went straight to the network with no cache and no fallback:
+   * tapping "← Queue" from an article, or any tab in the header, simply did
+   * nothing. Same stale-while-revalidate as an article, kept in the shell cache
+   * because that is where the matching documents live.
+   */
+  if (isRscRequest(request, url)) {
+    event.respondWith(
+      (async () => {
+        const key = rscKey(url);
+        const shell = await caches.open(SHELL_CACHE);
+        const cached = await shell.match(key);
+
+        const network = timedFetch(request)
+          .then((response) => {
+            if (
+              response.ok &&
+              response.type === "basic" &&
+              !response.redirected &&
+              !isPrefetch(request)
+            ) {
+              shell.put(key, response.clone());
+            }
+            return response;
+          })
+          .catch(() => null);
+
+        if (cached) {
+          event.waitUntil(network);
+          return cached;
+        }
+        // As with articles: a network error tells the router to fall back to a
+        // full navigation, which the handler below can serve from the cache.
+        return (await network) ?? Response.error();
+      })()
+    );
+    return;
+  }
+
   // Article pages: serve cache immediately, refresh in the background.
   if (isArticle(url) && request.mode === "navigate") {
     event.respondWith(
@@ -161,7 +313,7 @@ self.addEventListener("fetch", (event) => {
           (await cache.match(request)) ??
           (await caches.open(PRECACHE).then((p) => p.match(request)));
 
-        const network = fetch(request)
+        const network = timedFetch(request)
           .then((response) => {
             // Don't cache redirects to /login — that would pin a signed-out
             // page in place of the article.
@@ -187,9 +339,12 @@ self.addEventListener("fetch", (event) => {
       caches.open(ASSET_CACHE).then(async (cache) => {
         const cached = await cache.match(request);
         if (cached) return cached;
-        const response = await fetch(request);
-        if (response.ok) cache.put(request, response.clone());
-        return response;
+        // Had no catch: offline, the rejection propagated out of respondWith as
+        // a hard network error for that subresource, and a missing JS chunk
+        // means the served HTML never hydrates and the router never boots.
+        const response = await timedFetch(request).catch(() => null);
+        if (response?.ok) cache.put(request, response.clone());
+        return response ?? Response.error();
       })
     );
     return;
@@ -197,7 +352,7 @@ self.addEventListener("fetch", (event) => {
 
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request)
+      timedFetch(request)
         .then((response) => {
           if (response.ok && !response.redirected) {
             const copy = response.clone();
