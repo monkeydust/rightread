@@ -5,7 +5,7 @@
  * guarantees that keep such a page from failing needlessly: <style> blocks are
  * removed before jsdom sees them, and that removal never changes the article.
  */
-import { extractFromHtml } from "../src/lib/extract.ts";
+import { extractFromHtml, slashVariant } from "../src/lib/extract.ts";
 
 let failed = 0;
 function check(name: string, ok: boolean, detail = "") {
@@ -42,6 +42,36 @@ const multi = extractFromHtml(
   "https://example.com/c"
 );
 check("multiple style blocks are all removed", multi.wordCount > 30 && !/<style/i.test(multi.contentHtml));
+
+
+// ── Trailing-slash recovery ───────────────────────────────────────
+// Directory-style static hosts serve the article at exactly one of /post and
+// /post/ and answer the other with a 404 rather than a redirect, so a link that
+// works in a browser can fail here purely because of which form we were handed.
+// safeFetch gives a 404 one second look with the slash flipped; this pins the
+// flip itself, which is the part that can silently go wrong.
+{
+  const flip = (u: string) => slashVariant(u);
+
+  check("adds a missing slash", flip("https://a.com/post") === "https://a.com/post/");
+  check("removes a present slash", flip("https://a.com/post/") === "https://a.com/post");
+  check("handles nested paths", flip("https://a.com/a/b/c") === "https://a.com/a/b/c/");
+
+  // The root is the one place the slash is not optional, so there is no
+  // variant to try and no point spending a second request on it.
+  check("root has no variant", flip("https://a.com/") === null);
+  check("bare origin has no variant", flip("https://a.com") === null);
+
+  // The query and fragment belong to the request, not the path.
+  check(
+    "query is preserved",
+    flip("https://a.com/post?x=1") === "https://a.com/post/?x=1",
+    String(flip("https://a.com/post?x=1"))
+  );
+
+  check("garbage is refused rather than guessed at", flip("not a url") === null);
+}
+
 
 console.log(failed ? `\n${failed} FAILED` : `\nall passed`);
 process.exit(failed ? 1 : 0);

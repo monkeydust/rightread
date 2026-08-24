@@ -18,8 +18,19 @@ const JUNK_PARAMS = [
 
 /**
  * Normalizes a URL for storage and dedupe: https-only scheme check, tracking
- * params stripped, trailing slash and empty query/hash removed.
+ * params stripped, empty query and fragment removed.
  * Throws if the input is not a valid http(s) URL.
+ *
+ * **The trailing slash is deliberately left alone.** It used to be stripped, on
+ * the reasonable-sounding grounds that `/a` and `/a/` are the same page — but
+ * they are genuinely different resources, and directory-style static hosting
+ * (S3, GitHub Pages, anything without DirectorySlash) serves the article at one
+ * and a 404 at the other, without redirecting. Stripping it therefore took a
+ * URL that worked and stored one that did not, which broke both the fetch and
+ * the "Original ↗" link in the reader, silently and permanently.
+ *
+ * The cost is that saving both forms of a page makes two rows. That is rare and
+ * obvious; the alternative was an article that could never be read.
  */
 export function normalizeUrl(input: string): string {
   const trimmed = input.trim();
@@ -48,9 +59,6 @@ export function normalizeUrl(input: string): string {
 
   u.hash = "";
   u.hostname = u.hostname.toLowerCase();
-  if (u.pathname !== "/" && u.pathname.endsWith("/")) {
-    u.pathname = u.pathname.slice(0, -1);
-  }
 
   let out = u.toString();
   if (out.endsWith("?")) out = out.slice(0, -1);

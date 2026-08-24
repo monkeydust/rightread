@@ -111,11 +111,29 @@ export type SafeFetchOptions = {
  * This is the single hardened front door — article extraction and feed
  * fetching both come through here so the protections cannot drift apart.
  */
+/**
+ * The same path with its trailing slash flipped, or null when there is nothing
+ * to flip (the site root, where "/" is not optional).
+ */
+export function slashVariant(raw: string): string | null {
+  try {
+    const u = new URL(raw);
+    if (u.pathname === "/") return null;
+    u.pathname = u.pathname.endsWith("/")
+      ? u.pathname.slice(0, -1)
+      : `${u.pathname}/`;
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
 export async function safeFetch(
   url: string,
   opts: SafeFetchOptions
 ): Promise<{ body: string; finalUrl: string }> {
   let current = url;
+  let triedSlashVariant = false;
 
   for (let hop = 0; hop < 5; hop++) {
     const parsed = new URL(current);
@@ -141,6 +159,28 @@ export async function safeFetch(
       if (!location) throw new Error(`Redirect with no Location (${res.status})`);
       current = new URL(location, current).toString();
       continue;
+    }
+
+    /*
+     * A 404 is worth one second look with the trailing slash flipped.
+     *
+     * Directory-style static hosts answer only one of `/post` and `/post/` and
+     * 404 the other rather than redirecting, so a link that works in a browser
+     * can 404 here purely because of which form we were handed. Trying the
+     * other one costs a single request on a page that has already failed.
+     *
+     * Because `current` is what gets returned as `finalUrl`, a success here
+     * also records the working address as the item's resolvedUrl — which is
+     * what the reader offers as "Original ↗", so the outbound link is corrected
+     * as a side effect rather than needing its own repair.
+     */
+    if (res.status === 404 && !triedSlashVariant) {
+      const variant = slashVariant(current);
+      if (variant) {
+        triedSlashVariant = true;
+        current = variant;
+        continue;
+      }
     }
 
     if (!res.ok) throw new Error(`Fetch failed: HTTP ${res.status}`);

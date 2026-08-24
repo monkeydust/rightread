@@ -4,7 +4,10 @@ const cases: Array<[string, string, string]> = [
   ["strips utm", "https://a.com/x?utm_source=t&id=5", "https://a.com/x?id=5"],
   ["strips fbclid", "https://a.com/x?fbclid=abc", "https://a.com/x"],
   ["strips hash", "https://a.com/x#section", "https://a.com/x"],
-  ["trailing slash", "https://a.com/x/", "https://a.com/x"],
+  // Deliberately preserved, not stripped: /x and /x/ are different resources,
+  // and static hosts routinely serve one and 404 the other without redirecting.
+  // Stripping it turned working links into permanent extraction failures.
+  ["trailing slash kept", "https://a.com/x/", "https://a.com/x/"],
   ["root slash kept", "https://a.com/", "https://a.com/"],
   ["adds scheme", "example.com/post", "https://example.com/post"],
   ["lowercases host", "https://EXAMPLE.com/Path", "https://example.com/Path"],
