@@ -493,5 +493,52 @@ function documentsOf(cacheStore: ReturnType<typeof makeCaches>) {
   );
 }
 
+
+// ── The queue is state, not content ───────────────────────────────
+// Articles are finished, so serving a cached copy instantly is right. A queue's
+// whole job is to show what you just saved, so it must come from the network
+// whenever there is one. Getting this backwards meant saving a page and not
+// seeing it until you pulled to refresh.
+{
+  const responses: Record<string, { html?: string }> = { "/": { html: "<html>first</html>" } };
+  const { listeners, cacheStore, net } = loadWorker(responses);
+
+  // Populate the cache.
+  await sendFetch(listeners, "/", { rsc: true });
+  const cachedNames = [...cacheStore.stores.keys()].filter((n) => n.startsWith("rr-shell"));
+  check("the queue payload is kept for offline use", cachedNames.length === 1, JSON.stringify(cachedNames));
+
+  // The server now has something newer — a freshly saved article.
+  responses["/"] = { html: "<html>second</html>" };
+  const second = await sendFetch(listeners, "/", { rsc: true });
+  check(
+    "a queue with a network comes from the server, not the cache",
+    (second as { body?: string })?.body === "<html>second</html>",
+    JSON.stringify(second)
+  );
+
+  // With no network at all, the cached copy is what keeps the app usable.
+  net.offline = true;
+  const offline = await sendFetch(listeners, "/", { rsc: true });
+  check(
+    "offline the queue still falls back to the cache",
+    offline !== undefined && !(offline as { networkError?: boolean }).networkError,
+    JSON.stringify(offline)
+  );
+}
+
+// ── A stalled network must not wedge the queue either ─────────────
+{
+  const { listeners, net } = loadWorker({ "/": { html: "<html>x</html>" } });
+  await sendFetch(listeners, "/", { rsc: true });
+
+  net.stalls = true;
+  const settled = await Promise.race([
+    sendFetch(listeners, "/", { rsc: true }).then(() => "settled"),
+    new Promise((r) => setTimeout(() => r("HUNG"), 15_000)),
+  ]);
+  check("a stalled queue request gives up and uses the cache", settled === "settled", String(settled));
+}
+
 console.log(failed ? `\n${failed} FAILED` : `\nall passed`);
 process.exit(failed ? 1 : 0);

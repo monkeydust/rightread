@@ -17,7 +17,7 @@
 // Bump on any change to styling or markup: cached article HTML references
 // hashed CSS/font URLs, and stale HTML pointing at deleted chunks renders
 // unstyled. Activation deletes every shell/asset cache not matching this.
-const VERSION = "v22";
+const VERSION = "v23";
 
 /*
  * Downloaded articles are versioned SEPARATELY, and this is the whole point.
@@ -265,38 +265,37 @@ self.addEventListener("fetch", (event) => {
    *
    * These matched nothing at all and fell off the end of this listener, so
    * offline they went straight to the network with no cache and no fallback:
-   * tapping "← Queue" from an article, or any tab in the header, simply did
-   * nothing. Same stale-while-revalidate as an article, kept in the shell cache
-   * because that is where the matching documents live.
+   * tapping "← Queue" from an article, or any tab in the header, did nothing.
+   *
+   * NETWORK-FIRST, unlike the article branch above, and the difference is the
+   * whole point. An extracted article is finished: serving a cached copy
+   * instantly and refreshing behind it is exactly right. A queue is not
+   * content, it is *state* — its entire job is to show what you just saved —
+   * so answering from cache means saving a page and not seeing it, which is
+   * precisely what stale-while-revalidate here caused. Cache is the fallback
+   * for when there is no network, not the fast path.
    */
   if (isRscRequest(request, url)) {
     event.respondWith(
       (async () => {
         const key = rscKey(url);
         const shell = await caches.open(SHELL_CACHE);
-        const cached = await shell.match(key);
 
-        const network = timedFetch(request)
-          .then((response) => {
-            if (
-              response.ok &&
-              response.type === "basic" &&
-              !response.redirected &&
-              !isPrefetch(request)
-            ) {
-              shell.put(key, response.clone());
-            }
-            return response;
-          })
-          .catch(() => null);
-
-        if (cached) {
-          event.waitUntil(network);
-          return cached;
+        const fresh = await timedFetch(request).catch(() => null);
+        if (fresh?.ok && fresh.type === "basic" && !fresh.redirected) {
+          // Kept only so the list is there at all offline; never preferred
+          // while a network exists.
+          if (!isPrefetch(request)) shell.put(key, fresh.clone());
+          return fresh;
         }
-        // As with articles: a network error tells the router to fall back to a
-        // full navigation, which the handler below can serve from the cache.
-        return (await network) ?? Response.error();
+        // Anything the server did answer that we would not cache — a redirect
+        // to /login, say — is still the truthful reply.
+        if (fresh) return fresh;
+
+        const cached = await shell.match(key);
+        // A network error tells the router to fall back to a full navigation,
+        // which the handler below can still serve from the cache.
+        return cached ?? Response.error();
       })()
     );
     return;

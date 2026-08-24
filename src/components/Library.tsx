@@ -157,6 +157,32 @@ export function Library({ initialItems, status, precacheIds }: Props) {
     };
   }, [refresh, online]);
 
+  /*
+   * Refetch when the app comes back to the foreground.
+   *
+   * Nothing else asks. An installed PWA that has been backgrounded keeps its
+   * React state, its EventSource may have been dropped while it was away, and
+   * the polling fallback below only runs while something is still extracting —
+   * so a settled queue simply never updated. Save a page from the share sheet,
+   * reopen the app, and the article you just saved was not there until you
+   * pulled to refresh.
+   *
+   * refresh() is already timeout-bounded and already swallows its own failures,
+   * so this is a trigger rather than new machinery.
+   */
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      // A phone in a pocket costs nothing; a doomed request offline costs a
+      // socket held open for the OS timeout.
+      if (!isOnline()) return;
+      void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [refresh]);
+
   // Polling fallback, only while the stream is down. A proxy that buffers, a
   // service worker that intercepts, or a browser without EventSource would
   // otherwise leave the queue silently stale — so the old mechanism stays as
