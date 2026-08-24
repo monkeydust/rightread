@@ -500,4 +500,17 @@ npm run search:backfill        # index existing items (--index-only skips embedd
 
 ## Licence
 
-Personal project — all rights reserved.
+[MIT](LICENSE). Use it, change it, host it, sell it — keep the copyright notice,
+and it comes with no warranty.
+
+It started as a personal project and the licence said so, which rather undercut
+a README written for other people to read. If it is useful to you, take it.
+
+Every dependency is permissive too — MIT, Apache-2.0, ISC, or MPL — so there is
+nothing here that stops you.
+
+**One thing that is not covered by any of this:** the articles rightread saves
+belong to whoever wrote them. The app strips a page down for your own reading,
+which is a very different thing from republishing it. If you run an instance for
+other people, that is your call to think about, not something a licence on this
+code settles.
