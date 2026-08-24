@@ -10,8 +10,83 @@ Save a link from your phone's share sheet or your browser toolbar, and rightread
 strips the page down to the article — no ads, no cookie banners, no newsletter
 popups — and keeps it readable offline, in typography built for long reading.
 
-Capture, extract, read, prioritise. Pages are classified on arrival so a
-discussion thread and an essay can be treated as the different things they are.
+## Why this exists
+
+On 22 May 2025, Mozilla [announced it was winding Pocket
+down](https://blog.mozilla.org/en/mozilla/building-whats-next/). The app closed
+on 8 July, with an export window until 8 October, after which the data was
+deleted. The reason given was that the way people use the web had changed and
+resources were better spent elsewhere.
+
+I'd used Pocket for years, for one unglamorous thing: saving something on my
+phone and reading it properly later, usually somewhere with no signal. When it
+closed I went looking at the alternatives, and they were mostly fine — but they
+were either someone else's server holding my reading, or a subscription, or an
+"AI-powered reading assistant" that wanted to summarise the article instead of
+letting me read it.
+
+So I built the small thing I actually missed. One queue, clean text, works on a
+plane. It runs on a server I control and the whole library is a single SQLite
+file I can copy.
+
+To be precise about that, since it is the sort of claim people should not have
+to take on trust: your reading list lives on your own server, but the AI
+features are not local. When they are switched on, an article's text is sent to
+[OpenRouter](https://openrouter.ai) to be classified and embedded. Leave
+`OPENROUTER_API_KEY` unset and none of that happens: no article text leaves the
+box, and capturing, extracting, reading, keyword search and the queue all carry
+on exactly as before.
+
+## Built AI-second
+
+The interesting constraint I set myself was to build this **AI-second, not
+AI-first** — get the boring, deterministic version working properly before any
+model was allowed near it.
+
+That is not a philosophical position, it is a practical one. Every AI feature
+here needs the plain one underneath to be good first: semantic search is
+useless if extraction produces junk, and a similarity graph over badly parsed
+pages is a picture of your parser's mistakes.
+
+The commit history is the honest record of it. **The first commit contains no
+AI code at all** — no model calls, no embeddings, nothing. What it does contain
+is fetching, [Readability](https://github.com/mozilla/readability) extraction,
+sanitising, the reader, and the ordered queue. The capture-and-read loop worked,
+and was deployed and in use, before a model was involved in anything.
+
+Then, in order:
+
+| | |
+|---|---|
+| **First** | capture, extract, sanitise, read, reorder, offline |
+| **Then** | page classification — the first model call in the codebase |
+| **Then** | keyword search (SQLite FTS5), and semantic search beside it |
+| **Then** | the similarity graph, and Discover — both built on embeddings that already existed |
+
+Two rules fell out of that ordering and are worth stating, because they are the
+part I'd keep if I built it again:
+
+**AI sits at the edges, never in the way.** Classification, semantic search and
+recommendations all decorate a product that works without them. None of them is
+on the path between you and an article.
+
+**Every AI feature is fail-soft by contract.** No model call may break a
+capture, a search or a page render. Miss the API key entirely and pages classify
+as `other`, semantic search returns nothing, Discover is empty — and everything
+else behaves exactly as it did before. That is tested, not hoped for.
+
+The cost is real and worth naming: building this way is slower to anything
+impressive. For the first stretch the app was a list of links and some text —
+nothing you would screenshot — and every interesting feature was still ahead.
+
+What it bought is the numbers in the sections below. The similarity floors, the
+classifier accuracy, the graph percentiles: those exist because there was a
+working non-AI version to measure the AI against. Several values that *sounded*
+right turned out to be wrong the moment they were measured — the semantic search
+floor was set so high it silently returned nothing, and the first
+recommendations shipped at a threshold that could not tell "related" from "both
+are long English prose". I only caught either because the plain version was
+there to compare against.
 
 ---
 
