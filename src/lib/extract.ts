@@ -67,11 +67,35 @@ function findClientRedirect(html: string, baseUrl: string): string | null {
 }
 
 /** Hosts that resolve to the machine itself or the local network. */
-function isPrivateHost(hostname: string): boolean {
+export function isPrivateHost(hostname: string): boolean {
   const h = hostname.toLowerCase();
   if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local")) return true;
-  if (h === "[::1]" || h === "::1") return true;
   if (h === "metadata.google.internal") return true;
+
+  // IPv6 arrives bracketed from URL.hostname. The WHATWG parser already folds
+  // decimal / octal / hex / shorthand IPv4 back to dotted form, so those need
+  // no special case here — but it leaves IPv6 literals alone, and three of
+  // those reach private space. The dangerous one is ::ffff:127.0.0.1, an
+  // IPv4-mapped loopback that hits 127.0.0.1 on any dual-stack host; the guard
+  // used to wave it through.
+  if (h.startsWith("[") && h.endsWith("]")) {
+    const v6 = h.slice(1, -1);
+    if (v6 === "::1" || v6 === "::") return true; // loopback / unspecified
+    if (v6.startsWith("fe80")) return true; // link-local
+    if (/^f[cd][0-9a-f]{0,2}:/.test(v6) || v6 === "fc00" || v6.startsWith("fc") || v6.startsWith("fd"))
+      return true; // unique local, fc00::/7
+    // IPv4-mapped/compatible written with a trailing dotted quad.
+    const dotted = v6.match(/(?:^|:)(\d+\.\d+\.\d+\.\d+)$/);
+    if (dotted) return isPrivateHost(dotted[1]);
+    // The same mapped address folded to pure hex, e.g. ::ffff:7f00:1.
+    const hex = v6.match(/^::ffff:([0-9a-f]{1,4}):[0-9a-f]{1,4}$/);
+    if (hex) {
+      const octet = (parseInt(hex[1], 16) >> 8) & 0xff;
+      // Conservative: refuse the mapped ranges we block in IPv4.
+      if ([0, 10, 127, 169, 172, 192].includes(octet)) return true;
+    }
+    return false;
+  }
 
   const v4 = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
   if (v4) {
