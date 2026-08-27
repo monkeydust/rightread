@@ -4,6 +4,11 @@
 
 **Capture links from anywhere. Read them clean, later, offline.**
 
+<img src="docs/demo.gif" alt="Pasting a link into rightread and watching it save and extract" width="360">
+
+_Paste a link — it is extracted and ready to read, clean and offline._
+**[▶ Watch the full walkthrough](docs/walkthrough.mp4)** — save, search by meaning, read, wander a trail, go offline, and see how your library connects.
+
 </div>
 
 Save a link from your phone's share sheet or your browser toolbar, and rightread
