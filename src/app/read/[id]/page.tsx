@@ -6,7 +6,8 @@ import { hostLabel } from "@/lib/url";
 import { readingMinutes } from "@/lib/extract";
 import { ReaderControls } from "@/components/ReaderControls";
 import { ShareToGroup } from "@/components/ShareToGroup";
-import { Recommendations } from "@/components/Recommendations";
+import { Suspense } from "react";
+import { ArticleEndings } from "@/components/ArticleEndings";
 
 export const dynamic = "force-dynamic";
 
@@ -164,7 +165,12 @@ export default async function ReadPage(props: PageProps<"/read/[id]">) {
           />
         )}
 
-        <Recommendations userId={session.user.id} itemId={item.id} />
+        {/* Behind Suspense so the article streams first — the old panel was
+            awaited inline and blocked the text behind the candidate scan. A
+            null fallback means the reader simply ends until the panel lands. */}
+        <Suspense fallback={null}>
+          <ArticleEndings userId={session.user.id} itemId={item.id} />
+        </Suspense>
       </article>
     </div>
   );

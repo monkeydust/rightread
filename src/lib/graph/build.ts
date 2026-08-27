@@ -123,8 +123,12 @@ const DEFAULT_EDGE_FLOOR = 0.15;
 const DUPLICATE_AT = 0.99;
 
 /** Percentile boundaries for the three bands. */
-const MODERATE_PERCENTILE = 0.9;
-const STRONG_PERCENTILE = 0.99;
+// Exported for lib/graph/bands.ts, which estimates the same bands from a
+// sampled histogram so the reader page never pays this file's full O(n²) build.
+// The two derivations must share these definitions or "moderate" would quietly
+// mean different things on the graph page and in the reader.
+export const MODERATE_PERCENTILE = 0.9;
+export const STRONG_PERCENTILE = 0.99;
 
 const EDGE_FLOOR = readUnitFloat("GRAPH_EDGE_FLOOR", DEFAULT_EDGE_FLOOR, "graph");
 const MAX_NODES = readPositiveInt("GRAPH_MAX_NODES", 2000, "graph");
@@ -364,7 +368,7 @@ export function computeGraph(
 }
 
 /** Score at the given percentile, read off the histogram. */
-function percentileFromHistogram(
+export function percentileFromHistogram(
   histogram: Int32Array,
   total: number,
   p: number
