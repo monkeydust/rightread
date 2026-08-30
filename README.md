@@ -20,26 +20,26 @@ reading.
 
 On 22 May 2025, Mozilla [announced it was winding Pocket
 down](https://blog.mozilla.org/en/mozilla/building-whats-next/). I'd used it for
-years for one unglamorous thing: saving something on my phone and reading it
-properly later, usually somewhere with no signal.
+years for one thing: saving something on my phone and reading it
+properly later, usually when I was on the tube.
 
-The alternatives were mostly fine, but each was either somebody else's server
-holding my reading, or a subscription, or an "AI reading assistant" that wanted
-to summarise the article instead of letting me read it. So I built the small
+The alternatives were mostly 'meh' so I built the small
 thing I missed. One queue, clean text, works on a plane, running on a server I
 control with the whole library in a single SQLite file I can copy.
 
-One caveat, since it's the kind of claim people shouldn't take on trust. Your
-reading list lives on your own server, but the AI features are not local. With
+The reading list lives on your own server, but the AI features are not local. With
 them on, an article's text goes to [OpenRouter](https://openrouter.ai) to be
 classified and embedded. Leave `OPENROUTER_API_KEY` unset and none of that
 happens: no article text leaves the box, and capturing, reading, keyword search
 and the queue all work exactly as before.
 
+You could also move the AI features locally but its not something I need to do right now but 
+open to any contributions to help with that.
+
 ## Built AI-second
 
-I built this AI-second rather than AI-first. The plain version had to work
-properly before a model was allowed near it. That's a practical choice, not a
+I built this AI-second rather than AI-first. The core version had to work
+properly before a model was allowed near it to meet my needs. That's a practical choice, not a
 philosophical one: semantic search is useless if extraction produces junk, and a
 similarity graph over badly parsed pages is a picture of your parser's mistakes.
 
@@ -49,27 +49,11 @@ extraction, sanitising, the reader, and the ordered queue. That loop was
 deployed and in daily use before a model touched anything. Classification came
 next, then keyword and semantic search, then the graph and Discover.
 
-Two rules fell out of that order:
-
-- **AI sits at the edges, never in the way.** Classification, semantic search
-  and recommendations decorate a product that already works without them.
-- **Every AI feature is fail-soft.** No model call may break a capture, a search
-  or a page render. Miss the API key and pages classify as `other`, semantic
-  search returns nothing, Discover is empty, and everything else is unaffected.
-  That's tested, not hoped for.
-
-Building this way is slow to reach anything impressive, but it bought the one
-thing that matters: a working baseline to measure the AI against. Several values
-that *sounded* right were wrong the moment they were measured. The semantic
-search floor was set so high it silently returned nothing, and the first
-recommendations couldn't tell "related" from "both are long English prose". I
-only caught either because the plain version was there to compare against. The
-measured floors and thresholds live in comments next to the code that uses them.
-
 ## What it does
 
-**Capture from anywhere.** Android share sheet (PWA share target), an Edge/Chrome
-extension, or a paste box in the app. All three hit one endpoint.
+**Capture from anywhere.** Android share (PWA share target), an Edge/Chrome
+extension, or a paste box in the app. I mostly use the Android share and in one action get
+the article saved to rightread. 
 
 **Extract properly.** Readability pulls out the article, DOMPurify sanitises it
 under a strict allowlist, then a tidy pass removes the wrappers, empty paragraphs
@@ -92,7 +76,7 @@ semantic hit is a guess.
 **See how it connects.** A force-directed map of the whole library, built from
 the same embeddings, where the clusters are reading interests nobody declared.
 
-## Getting started
+## Getting started (hereon most of this content is AI Assisted)
 
 ```bash
 npm install
