@@ -7,7 +7,6 @@
 <img src="docs/demo.gif" alt="Pasting a link into rightread and watching it save and extract" width="360">
 
 _Paste a link. It gets extracted and it's ready to read, clean and offline._
-**[▶ Watch the full walkthrough](docs/walkthrough.mp4)** covers save, search by meaning, read, trails, offline, and how your library connects.
 
 </div>
 
