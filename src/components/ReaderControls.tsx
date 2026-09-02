@@ -155,6 +155,16 @@ function DisplayPanel({
     setTheme(next);
     document.documentElement.setAttribute("data-theme", next);
     localStorage.setItem("rr:theme", next);
+    // Keep the phone's status-bar tint in step with the chosen theme. sepia's
+    // app chrome (--bg) stays cream, so only dark goes black.
+    const bar = next === "dark" ? "#000000" : "#faf9f5";
+    let meta = document.querySelector('meta[name="theme-color"]');
+    if (!meta) {
+      meta = document.createElement("meta");
+      meta.setAttribute("name", "theme-color");
+      document.head.appendChild(meta);
+    }
+    meta.setAttribute("content", bar);
   }
 
   // Close on any click outside the panel, and on Escape.

@@ -20,10 +20,12 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#faf9f5" },
-    { media: "(prefers-color-scheme: dark)", color: "#000000" },
-  ],
+  // No themeColor here on purpose. A media-based theme-color can only follow
+  // the *system* colour scheme, but the app has its own theme toggle
+  // (data-theme) that overrides it — so a dark-in-app choice on a light phone
+  // left the status bar tinted cream over a black app. The tag is created and
+  // kept in sync with the resolved theme by the pre-paint script below and by
+  // applyTheme in ReaderControls.
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
@@ -52,6 +54,20 @@ export default function RootLayout({
   if(S[s])d.style.setProperty("--reader-scale",S[s]);
   if(W[w])d.style.setProperty("--reader-width",W[w]);
   if(t)d.dataset.theme=t;
+  // Tint the phone's status bar to match the resolved theme, not the system
+  // scheme — otherwise a dark-in-app choice on a light phone leaves a cream
+  // bar over a black app. sepia keeps the app chrome (--bg) cream.
+  var mq=window.matchMedia("(prefers-color-scheme: dark)");
+  function paintBar(){
+    var dark = t==="dark" || (!t && mq.matches);
+    var c = dark ? "#000000" : "#faf9f5";
+    var m = document.querySelector('meta[name="theme-color"]');
+    if(!m){m=document.createElement("meta");m.setAttribute("name","theme-color");document.head.appendChild(m);}
+    m.setAttribute("content", c);
+  }
+  paintBar();
+  // Follow the system if the user never made an explicit choice.
+  if(!t)mq.addEventListener("change", paintBar);
 }catch(e){}})()`,
           }}
         />
