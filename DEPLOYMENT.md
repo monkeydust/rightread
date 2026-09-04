@@ -75,6 +75,7 @@ DATABASE_URL="file:/app/data/production.db"
 RIGHTREAD_ALLOWED_EMAILS="you@example.com,someone@else.com"
 OPENROUTER_API_KEY="<openrouter key>"
 OPENROUTER_MODEL="openai/gpt-5.6-luna"
+OPENROUTER_SUMMARY_MODEL="openai/gpt-5.6-sol"   # optional; blank = OPENROUTER_MODEL
 ```
 
 `EMAIL_FROM` must use a domain **verified at resend.com/domains**, and this
@@ -106,6 +107,8 @@ docker-compose --env-file .env.prod exec app printenv RIGHTREAD_ALLOWED_EMAILS
 `OPENROUTER_*` drives page classification and thread summaries. If the key is
 absent the app still works — pages classify as `other`, the Summarise button
 reports that the summariser is unavailable, and nothing else errors.
+`OPENROUTER_SUMMARY_MODEL` lets summaries use a stronger model than the cheap
+one classification needs; each summary row records the model that wrote it.
 
 `AUTH_URL` matters. With it set, `src/app/api/auth/[...nextauth]/route.ts`
 stops deriving the host from request headers. That derivation exists only to

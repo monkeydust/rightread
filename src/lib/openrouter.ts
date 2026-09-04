@@ -1,8 +1,12 @@
 /**
  * OpenRouter client — the single LLM entry point for rightread.
  *
- * rightread deliberately uses one model for everything (classification now,
- * summarisation later). One env var, one code path, no per-feature routing.
+ * One code path, one default model. The single exception is summaries, which
+ * may name their own model (SUMMARY_MODEL): classification is a cheap
+ * five-way label where a budget model measured 44/44, while a summary is
+ * judgment — which three comments stand out, whether a consensus shifted —
+ * and that is where a stronger model earns its price. Both fall back to the
+ * same default, so an unset variable changes nothing.
  *
  * Every call here is fail-soft: LLM work is an enhancement, never a
  * prerequisite. A classification that can't run must not break a capture, the
@@ -16,6 +20,9 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 // variable into the empty string, which `??` happily accepts and then sends
 // to the API as a blank model name.
 export const MODEL = process.env.OPENROUTER_MODEL?.trim() || "openai/gpt-5.6-luna";
+
+/** The model summaries use. Defaults to MODEL, so it is opt-in per deploy. */
+export const SUMMARY_MODEL = process.env.OPENROUTER_SUMMARY_MODEL?.trim() || MODEL;
 
 export type LLMMessage = { role: "system" | "user"; content: string };
 
@@ -116,9 +123,17 @@ function isTransient(err: unknown): boolean {
  * LLMUnavailableError when the call cannot be made or the response is unusable
  * — callers are expected to degrade, not crash.
  */
+export type CallOptions = {
+  json?: boolean;
+  maxTokens?: number;
+  timeoutMs?: number;
+  /** Defaults to MODEL. Only summaries pass anything else. */
+  model?: string;
+};
+
 export async function callModel(
   messages: LLMMessage[],
-  options: { json?: boolean; maxTokens?: number; timeoutMs?: number } = {}
+  options: CallOptions = {}
 ): Promise<LLMResult> {
   try {
     return await callModelOnce(messages, options);
@@ -134,7 +149,7 @@ export async function callModel(
 
 async function callModelOnce(
   messages: LLMMessage[],
-  options: { json?: boolean; maxTokens?: number; timeoutMs?: number } = {}
+  options: CallOptions = {}
 ): Promise<LLMResult> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
@@ -155,7 +170,7 @@ async function callModelOnce(
         "X-Title": "rightread",
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: options.model ?? MODEL,
         messages,
         max_tokens: options.maxTokens ?? 300,
         ...(options.json ? { response_format: { type: "json_object" } } : {}),

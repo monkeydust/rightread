@@ -35,6 +35,9 @@ services:
       # .env.prod passes it in as an EMPTY STRING, not as unset — so without a
       # default, adding an override knob here would blank the value it overrides.
       - OPENROUTER_MODEL=${OPENROUTER_MODEL:-openai/gpt-5.6-luna}
+      # Summaries only. Empty string here is fine: the code treats blank as
+      # "use OPENROUTER_MODEL" (`||`, not `??`).
+      - OPENROUTER_SUMMARY_MODEL=${OPENROUTER_SUMMARY_MODEL:-}
       - OPENROUTER_EMBED_MODEL=${OPENROUTER_EMBED_MODEL:-openai/text-embedding-3-small}
       # Semantic similarity cut-off; see the measurements in lib/search/search.ts.
       - OPENROUTER_SEMANTIC_FLOOR=${OPENROUTER_SEMANTIC_FLOOR:-0.22}

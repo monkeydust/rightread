@@ -1,4 +1,4 @@
-import { callModel, parseJSON, MODEL, LLMUnavailableError } from "../openrouter";
+import { callModel, parseJSON, SUMMARY_MODEL, LLMUnavailableError } from "../openrouter";
 import { isKind, type Kind } from "../classify/kinds";
 import type { Thread } from "../threads";
 import {
@@ -61,7 +61,7 @@ export async function summarizePage(input: SummaryInput): Promise<SummaryResult>
     ],
     // Generous ceiling: truncating a summary mid-sentence is worse than the
     // handful of tokens saved, and the model is told to be brief anyway.
-    { json: true, maxTokens: 1600, timeoutMs: 90_000 }
+    { json: true, maxTokens: 1600, timeoutMs: 90_000, model: SUMMARY_MODEL }
   );
 
   const parsed = parseJSON<{
@@ -90,7 +90,7 @@ export async function summarizePage(input: SummaryInput): Promise<SummaryResult>
     links: kind === "conversation" ? stringList(parsed.links, MAX_LINKS) : [],
     verdict: typeof parsed.verdict === "string" ? parsed.verdict.trim() : "",
     sinceLast,
-    model: MODEL,
+    model: SUMMARY_MODEL,
     costUsd: result.costUsd,
     durationMs: result.durationMs,
     textChars: Math.min(text.length, input.maxChars ?? 40_000),

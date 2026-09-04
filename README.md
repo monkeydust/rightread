@@ -108,6 +108,7 @@ Stack: Next.js 16 · React 19 · Prisma + SQLite · Auth.js (magic link via Rese
 | `RIGHTREAD_ALLOWED_EMAILS` | Comma-separated allow list. **Blank means nobody can sign in.** |
 | `OPENROUTER_API_KEY` | OpenRouter key. Without it classification degrades to `other` and nothing breaks. |
 | `OPENROUTER_MODEL` | Defaults to `openai/gpt-5.6-luna`. |
+| `OPENROUTER_SUMMARY_MODEL` | Model for thread summaries. Blank means `OPENROUTER_MODEL`. |
 | `OPENROUTER_EMBED_MODEL` | Defaults to `openai/text-embedding-3-small`. Changing it invalidates stored vectors. |
 | `OPENROUTER_SEMANTIC_FLOOR` | Semantic search cut-off, 0 to 1. Defaults to `0.22`. |
 | `GRAPH_EDGE_FLOOR` / `GRAPH_MAX_NODES` | Graph noise guard (`0.15`) and size cap (`2000`). |
