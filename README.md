@@ -67,6 +67,12 @@ matter, and an archive for things you've finished.
 **Bring things to you.** Add sites to watch and topics you care about, and
 matching articles collect under Discover.
 
+**Summarise a thread, and see how it moved.** For discussion threads (Hacker
+News is read as a proper nested thread, not a wall of text) a button gives you
+where it stands, who disagrees, the comments worth reading and the links people
+dropped. Press it again next week and you get "since last time", with every
+earlier summary kept underneath. Nothing is summarised unless you ask.
+
 **Search two ways.** Keyword search over the full text, and semantic search that
 finds pages about what you asked even when they never use your words. The two
 show as separate labelled groups, never merged: a keyword hit is a fact, a

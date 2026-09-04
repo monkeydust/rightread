@@ -4,6 +4,7 @@ import { sanitizeArticleHtml } from "@/lib/sanitize";
 import { normalizeUrl, hostLabel } from "@/lib/url";
 import { extractArticle, extractFromHtml, type Extracted } from "@/lib/extract";
 import { youtubeVideoId, extractYouTube } from "@/lib/extract-video";
+import { threadAdapterFor, fetchThread, renderThread } from "@/lib/threads";
 import { classifyPage, type PageEvidence } from "@/lib/classify";
 import { publish } from "@/lib/events";
 import { embed, embeddableText, toBlob, EMBED_MODEL } from "@/lib/search/embed";
@@ -89,7 +90,7 @@ export async function runExtraction(itemId: string, url: string): Promise<void> 
     const videoId = youtubeVideoId(url);
     const article = videoId
       ? await extractYouTube(url, videoId)
-      : await extractArticle(url);
+      : (await extractThreadOrNull(url)) ?? (await extractArticle(url));
     await persistArticle(itemId, article, owner?.userId, notify);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -139,12 +140,37 @@ export async function runExtraction(itemId: string, url: string): Promise<void> 
 }
 
 /**
+ * A discussion thread read as data, or null to fall through to Readability.
+ *
+ * Readability on a comment thread keeps the post and drops the comments, or
+ * flattens everything into an unattributed wall — either way the reader gets
+ * less than the page had. Where a site exposes the thread as structure
+ * (`src/lib/threads/`), build the article from that instead. An adapter
+ * failure is not a capture failure: the page path is what ran before and is
+ * never worse than today.
+ */
+async function extractThreadOrNull(url: string): Promise<Extracted | null> {
+  if (!threadAdapterFor(url)) return null;
+  try {
+    return renderThread(await fetchThread(url));
+  } catch (err) {
+    console.warn(
+      `[rightread] thread adapter failed for ${url}, using page extraction:`,
+      err instanceof Error ? err.message : err
+    );
+    return null;
+  }
+}
+
+/**
  * Persists an extracted article and runs the rest of the pipeline —
  * classification, embedding, recommendations. Shared by the fetch path
  * (runExtraction) and the paste path (applyProvidedContent) so both produce an
  * identical item: same fields, same classification, same place in Discover.
+ * Also the write path for a thread refresh (`lib/summarize/refresh.ts`), so a
+ * re-fetched thread is re-embedded and its shelf cards updated the same way.
  */
-async function persistArticle(
+export async function persistArticle(
   itemId: string,
   article: Extracted,
   userId: string | undefined,

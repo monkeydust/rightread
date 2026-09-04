@@ -103,8 +103,9 @@ person is an edit to this file plus a redeploy. Check it took with:
 docker-compose --env-file .env.prod exec app printenv RIGHTREAD_ALLOWED_EMAILS
 ```
 
-`OPENROUTER_*` drives page classification (and, later, summaries). If the key is
-absent the app still works — pages classify as `other` and nothing errors.
+`OPENROUTER_*` drives page classification and thread summaries. If the key is
+absent the app still works — pages classify as `other`, the Summarise button
+reports that the summariser is unavailable, and nothing else errors.
 
 `AUTH_URL` matters. With it set, `src/app/api/auth/[...nextauth]/route.ts`
 stops deriving the host from request headers. That derivation exists only to

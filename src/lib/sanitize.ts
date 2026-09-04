@@ -78,6 +78,12 @@ export function sanitizeArticleHtml(
     // data: URIs are the one non-http exception, and only for images.
     ALLOWED_URI_REGEXP:
       /^(?:https?:|mailto:|data:image\/(?:png|jpe?g|gif|webp|avif);base64,)/i,
+    // DOMPurify runs ALLOWED_URI_REGEXP over the value of *every* allowed
+    // attribute it does not already know to be non-URI (alt, title, …), and
+    // the strict regexp above has no clause for plain values the way the
+    // default's `[^a-z]` does. So <time datetime="2026-…"> lost its attribute.
+    // Declaring it URI-safe is the narrow fix; a timestamp is not a URL.
+    ADD_URI_SAFE_ATTR: ["datetime"],
     FORBID_TAGS: ["style", "form", "input", "button", "svg", "math"],
     FORBID_ATTR: ["style", "srcset", "formaction", "ping"],
     // DOMPurify allows data-* by default. They are dead weight in a reader,

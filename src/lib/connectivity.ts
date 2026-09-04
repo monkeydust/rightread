@@ -96,10 +96,16 @@ export const CLIENT_TIMEOUT_MS = 8000;
  */
 export async function netFetch(
   input: RequestInfo | URL,
-  init: RequestInit = {}
+  init: RequestInit = {},
+  /**
+   * Only for calls that are legitimately slow and say so on screen — a model
+   * generating a summary. Everything a tap expects to feel instant keeps the
+   * default.
+   */
+  timeoutMs: number = CLIENT_TIMEOUT_MS
 ): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(input, { ...init, signal: controller.signal });
     // A 5xx means the server answered, so the network is fine even though the

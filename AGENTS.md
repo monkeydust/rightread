@@ -44,6 +44,29 @@ polluted by machine-fetched articles, and saving a recommendation goes
 through the normal capture flow. The reader shows the panel only when
 something clears the measured similarity floor shared with semantic search.
 
+## Thread summaries
+The one place a model writes prose the reader sees, and it is confined to
+`conversation`-kind pages, where a summary of a 200-comment discussion is a
+service rather than a substitute for reading. Rules:
+
+- **On demand only.** Nothing on the capture path writes a summary. The button
+  in the reader (`ThreadSummary`) calls `POST /api/items/[id]/summary`, which
+  is not fail-soft: the user pressed a button, so every failure is a message.
+- **Refresh means re-fetch.** A summary of last week's copy says nothing about
+  what happened since. `refreshSummary` (`src/lib/summarize/refresh.ts`)
+  re-fetches the thread, replaces the stored copy through `persistArticle`,
+  and only then summarises — with the previous summary in hand, so the model
+  writes `sinceLast`.
+- **History is append-only.** `ItemSummary` gets a row per generation, each
+  recording what it summarised (`fetchedAt`, `commentCount`, `newComments`).
+  The sequence is the record of how the discussion moved; never overwrite it.
+- **Threads are read as structure where possible.** `src/lib/threads/` has one
+  adapter per site (HN today, via the Algolia API); `runExtraction` uses it at
+  capture too, so an HN item is a nested thread rather than Readability's
+  guess. Per-comment timestamps make "new since last time" a fact. Sites
+  without an adapter take the page path: ordinary re-extraction, no comment
+  count. Reddit blocks server fetches entirely and stays on the paste path.
+
 ## Offline
 The app is meant to be read on a plane, so offline is a first-class mode, not a
 degraded one. Three rules, each of which was learned the hard way:

@@ -77,6 +77,21 @@ check("buildTrail: cannot start on another user's item", (await trail.buildTrail
 const tokens = await import("../src/lib/tokens.ts");
 check("token: garbage resolves to nobody", (await tokens.userIdFromToken("wrong")) === null);
 
+// Summaries: history is read by owner, and a refresh on someone else's item
+// is refused before it fetches or bills anything.
+const store = await import("../src/lib/summarize/store.ts");
+await store.saveSummary({
+  userId: alice.id, itemId: aliceItem.id, kind: "conversation", tldr: "alice's private summary",
+  points: [], standout: [], links: [], verdict: "", sinceLast: null, sourceKind: "page",
+  fetchedAt: new Date(), commentCount: null, newComments: null, textChars: 10, model: "test", costUsd: null, durationMs: 1,
+});
+check("listSummaries: owner sees own history", (await store.listSummaries(alice.id, aliceItem.id)).length === 1);
+check("listSummaries: another user sees nothing", (await store.listSummaries(bob.id, aliceItem.id)).length === 0, "BOB READ ALICE SUMMARY");
+const refresh = await import("../src/lib/summarize/refresh.ts");
+const refused = await refresh.refreshSummary(bob.id, aliceItem.id).then(() => false, (e) => e instanceof refresh.NotFoundError);
+check("refreshSummary: another user's item is Not Found", refused, "BOB REFRESHED ALICE SUMMARY");
+check("refreshSummary: nothing was written", (await prisma.itemSummary.count({ where: { itemId: aliceItem.id } })) === 1);
+
 await prisma.$disconnect();
 for (const f of [DB, DB + "-journal"]) { try { if (existsSync(f)) rmSync(f); } catch {} }
 console.log(failed === 0 ? "\nAll IDOR checks pass." : "\n" + failed + " FAILING — data boundary hole");

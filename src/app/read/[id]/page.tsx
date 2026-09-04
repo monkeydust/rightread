@@ -8,8 +8,24 @@ import { ReaderControls } from "@/components/ReaderControls";
 import { ShareToGroup } from "@/components/ShareToGroup";
 import { Suspense } from "react";
 import { ArticleEndings } from "@/components/ArticleEndings";
+import { ThreadSummary } from "@/components/ThreadSummary";
+import { listSummaries } from "@/lib/summarize/store";
+import { threadAdapterFor } from "@/lib/threads";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * How many comments the stored thread has, for the "24 comments" hint before
+ * any summary exists. A thread rendered by an adapter puts exactly one <cite>
+ * per comment; a page that came through Readability (saved before the adapter
+ * existed) has none, and gets no number rather than a wrong one — which is
+ * also why zero reads as unknown here.
+ */
+function renderedCommentCount(item: { url: string; contentHtml: string | null }): number | null {
+  if (!item.contentHtml || !threadAdapterFor(item.url)) return null;
+  const n = (item.contentHtml.match(/<cite>/g) ?? []).length;
+  return n > 0 ? n : null;
+}
 
 export async function generateMetadata(props: PageProps<"/read/[id]">) {
   const session = await auth();
@@ -124,6 +140,18 @@ export default async function ReadPage(props: PageProps<"/read/[id]">) {
           }}
         />
 
+        {item.kind === "conversation" && (
+          <ThreadSummary
+            itemId={item.id}
+            summaries={(await listSummaries(session.user.id, item.id)).map((s) => ({
+              ...s,
+              createdAt: s.createdAt.toISOString(),
+              fetchedAt: s.fetchedAt.toISOString(),
+            }))}
+            commentCount={renderedCommentCount(item)}
+          />
+        )}
+
         {pending && (
           <p
             className="mt-8 animate-pulse text-sm"
@@ -159,6 +187,9 @@ export default async function ReadPage(props: PageProps<"/read/[id]">) {
         {item.contentHtml && (
           <div
             className="prose-reader mt-8"
+            /* A thread rendered from structure (nested blockquotes, one <cite>
+               per comment) is styled as a thread, not as quoted prose. */
+            data-thread={renderedCommentCount(item) != null ? "" : undefined}
             /* Sanitized in src/lib/sanitize.ts (DOMPurify, strict allowlist)
                before it was ever written to the database. */
             dangerouslySetInnerHTML={{ __html: item.contentHtml }}

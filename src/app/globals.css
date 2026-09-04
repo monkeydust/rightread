@@ -315,6 +315,36 @@ body {
   color: color-mix(in srgb, var(--paper-text) 85%, transparent);
 }
 
+/* ── Discussion threads (src/lib/threads/render.ts) ──────────────────
+   The nesting is real structure, not quotation: every comment is a
+   blockquote inside its parent's. So: upright text at full ink, a thin bar
+   per level, and an indent small enough that six levels still leave most of
+   a phone's width for the words. The first <p> in each is the author line. */
+.prose-reader[data-thread] blockquote {
+  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  padding-left: 0.75em;
+  margin-block: 1em;
+  font-style: normal;
+  color: var(--paper-text);
+}
+.prose-reader[data-thread] blockquote > blockquote:first-of-type {
+  margin-top: 0.9em;
+}
+.prose-reader[data-thread] blockquote > p:first-child {
+  margin: 0 0 0.35em;
+  font-family: var(--font-sans);
+  font-size: 0.78em;
+  color: color-mix(in srgb, var(--paper-text) 55%, transparent);
+}
+.prose-reader[data-thread] cite {
+  font-style: normal;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--paper-text) 78%, transparent);
+}
+.prose-reader[data-thread] blockquote p {
+  margin-block: 0.55em;
+}
+
 .prose-reader pre {
   font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
   font-size: 0.82em;

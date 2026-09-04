@@ -38,11 +38,16 @@ Respond with a single JSON object and nothing else:
 
 /** What "the key points" means for each kind. */
 const PER_KIND: Record<Kind, string> = {
-  conversation: `This page is a DISCUSSION between many people. There is no single author and usually no thesis, so do not write as if there were — never say "the author argues".
+  conversation: `This page is a DISCUSSION between many people. There is no single author and usually no thesis, so do not write as if there were — never say "the author argues". Each comment is prefixed with its author and depth (0 = a direct reply to the post).
 
 - tldr: what was being discussed, and where the discussion landed overall.
 - points: the substance of the disagreement and agreement. What did most people accept? What split the room, and what were the competing positions? Include any specific claim, number, benchmark or war story worth remembering — those are usually the value in a thread. Attribute contested claims ("several commenters reported…", "one maintainer replied…") rather than stating them as fact.
-- verdict: whether the thread is worth reading in full, or whether these points are the whole of it. Threads are often 90% noise — say so when true.`,
+- standout: up to 3 individual comments worth reading verbatim — the ones with first-hand experience, hard numbers, or the sharpest counter-argument. Each as "<author>: <one-sentence gist>". Empty if none stands out.
+- links: up to 6 resources people dropped in — tools, papers, articles, repos — each as "<url> — <what it is, from the thread>". Only URLs that appear in the text; never the thread's own URL. Empty if none.
+- verdict: whether the thread is worth reading in full, or whether these points are the whole of it. Threads are often 90% noise — say so when true.
+
+For a discussion the JSON object has these fields:
+{"tldr": "...", "points": ["..."], "standout": ["..."], "links": ["..."], "verdict": "..."}`,
 
   article: `This page is REPORTED JOURNALISM.
 
@@ -74,17 +79,44 @@ If the text is too thin or broken to summarise honestly, say exactly that in tld
 /** Enough text for a good summary without paying for a whole book. */
 const MAX_CHARS = 40_000;
 
+/**
+ * The last summary of the same page, when there is one. A refresh is asked to
+ * describe what moved, not to start over — the reader already read the
+ * previous version, and "what changed" is the whole reason they pressed
+ * Refresh on something they had already summarised.
+ */
+export type PreviousSummary = {
+  createdAt: Date;
+  /** When the text it summarised was fetched — what "new" is measured from. */
+  fetchedAt: Date;
+  tldr: string;
+  points: string[];
+  verdict: string;
+  commentCount: number | null;
+};
+
+const SINCE_LAST = `A previous summary of this same page exists, below. This time also write a "sinceLast" field: what has changed in the discussion since then — new arguments, a shifted or hardened consensus, notable new comments, questions that got answered. Where comments are marked [NEW] they arrived after the previous summary; comments without the mark were already there. Use the marks, but never mention them or the mechanics of comparison — write about the discussion, as if to someone who read the earlier summary. Be concrete about what is new. If nothing meaningful changed, say so in one plain sentence (e.g. "Nothing of substance has been added since.") rather than inventing movement. Add "sinceLast" to the JSON object as a string.`;
+
 export type SummaryInput = {
-  kind: Kind;
+  /** Anything not a known Kind is summarised as "other". */
+  kind: string;
   title: string;
   url: string;
   text: string;
   byline?: string | null;
   siteName?: string | null;
+  /** When present, the model is asked for `sinceLast` against it. */
+  previous?: PreviousSummary | null;
+  /**
+   * Overrides the prose ceiling. Threads are pre-budgeted by
+   * `threadText`, which has already chosen what to keep; clipping again here
+   * would cut the tail of that selection blind.
+   */
+  maxChars?: number;
 };
 
-export function systemPromptFor(kind: Kind): string {
-  return `${SHARED}\n\n---\n\n${PER_KIND[kind]}`;
+export function systemPromptFor(kind: Kind, previous?: PreviousSummary | null): string {
+  return [SHARED, PER_KIND[kind], ...(previous ? [SINCE_LAST] : [])].join("\n\n---\n\n");
 }
 
 export function buildUserMessage(input: SummaryInput): string {
@@ -92,22 +124,44 @@ export function buildUserMessage(input: SummaryInput): string {
   if (input.siteName) head.push(`Site: ${input.siteName}`);
   if (input.byline) head.push(`Byline: ${input.byline}`);
 
+  const limit = input.maxChars ?? MAX_CHARS;
   const text = input.text.trim();
-  const clipped = text.length > MAX_CHARS;
+  const clipped = text.length > limit;
+
+  const previous = input.previous
+    ? [
+        "",
+        `Previous summary (written ${input.previous.createdAt.toISOString().slice(0, 10)}${
+          input.previous.commentCount != null
+            ? `, when the thread had ${input.previous.commentCount} comments`
+            : ""
+        }):`,
+        `tldr: ${input.previous.tldr}`,
+        ...input.previous.points.map((p) => `- ${p}`),
+        `verdict: ${input.previous.verdict}`,
+      ]
+    : [];
 
   return [
     ...head,
+    ...previous,
     "",
     clipped
-      ? `Page text (truncated to the first ${MAX_CHARS.toLocaleString()} characters — summarise only what is here, and do not speculate about the rest):`
+      ? `Page text (truncated to the first ${limit.toLocaleString()} characters — summarise only what is here, and do not speculate about the rest):`
       : "Page text:",
     "---",
-    text.slice(0, MAX_CHARS),
+    text.slice(0, limit),
   ].join("\n");
 }
 
 export type Summary = {
   tldr: string;
   points: string[];
+  /** Conversation only; empty for other kinds. */
+  standout: string[];
+  /** Conversation only; empty for other kinds. */
+  links: string[];
   verdict: string;
+  /** Present only when a previous summary was supplied. */
+  sinceLast: string | null;
 };
