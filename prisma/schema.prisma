@@ -30,6 +30,7 @@ model User {
   memberOf        MemberOf[]
   shares          GroupShare[]
   dismissals      GroupShareDismissal[]
+  summaries       ItemSummary[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 }
@@ -155,11 +156,58 @@ model Item {
   savedAt   DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  summaries ItemSummary[]
+
   @@unique([userId, url])
   @@index([userId, status, position])
   @@index([userId, starred])
   @@index([userId, kind])
   @@index([userId, savedAt])
+}
+
+/// One generated summary of an item. Append-only: a refresh adds a row rather
+/// than replacing the last one, because a thread today is not the thread
+/// tomorrow and the history is the point — each row records what it was
+/// summarising (fetchedAt, commentCount) so the sequence is honest about what
+/// actually changed. Only ever created by the user pressing a button; nothing
+/// on the capture path writes here.
+model ItemSummary {
+  id        String   @id @default(cuid())
+  itemId    String
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  /// The kind the prompt was chosen for. Kind is user-overridable, so a
+  /// later change can leave an older row summarised under a different shape.
+  kind      String
+  tldr      String
+  /// JSON string[] — the substance of agreement and disagreement.
+  points    String
+  /// JSON string[] — "author: gist", the comments worth reading verbatim.
+  standout  String
+  /// JSON string[] — "url — what it is", resources dropped in the thread.
+  links     String
+  verdict   String
+  /// What moved since the previous row. Null on the first summary.
+  sinceLast String?
+
+  /// "hn" when a thread adapter supplied structured comments, "page" when the
+  /// text came from ordinary extraction and no comment structure was known.
+  sourceKind   String
+  fetchedAt    DateTime
+  commentCount Int?
+  /// Comments newer than the previous row's fetchedAt; null without structure.
+  newComments  Int?
+  textChars    Int
+
+  model      String
+  costUsd    Float?
+  durationMs Int
+
+  @@index([itemId, createdAt])
+  @@index([userId])
 }
 
 // ─── Recommendations ────────────────────────────────────────
