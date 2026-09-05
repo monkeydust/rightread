@@ -17,7 +17,7 @@
 // Bump on any change to styling or markup: cached article HTML references
 // hashed CSS/font URLs, and stale HTML pointing at deleted chunks renders
 // unstyled. Activation deletes every shell/asset cache not matching this.
-const VERSION = "v27";
+const VERSION = "v28";
 
 /*
  * Downloaded articles are versioned SEPARATELY, and this is the whole point.
@@ -466,5 +466,44 @@ self.addEventListener("message", (event) => {
     // script on the page, and this one causes network fetches.
     const safe = paths.filter((p) => typeof p === "string" && /^\/read\/[\w-]+$/.test(p));
     event.waitUntil(syncPrecache(safe));
+    return;
+  }
+
+  /*
+   * The page tells us an article has changed on the server.
+   *
+   * Articles are cache-first because an extracted page is finished — until
+   * the reader presses Summarise, which re-fetches the thread and adds a
+   * summary to the page itself. Without this, the refresh after that press
+   * was answered from the cache with the page as it was, and the router was
+   * handed a payload cached from a *navigation* in reply to a *refresh*,
+   * which it could not reconcile: the summary appeared only after the app was
+   * restarted, and "← Queue" stopped working until then.
+   *
+   * Drops both stored forms (document and flight payload) from both caches,
+   * then acks on the reply port so the page can reload knowing the next
+   * request will reach the network. The page never waits on the ack for long
+   * — a worker that has gone away must not hold the reload hostage.
+   */
+  if (event.data?.type === "INVALIDATE_ARTICLE") {
+    const path = event.data.path;
+    const port = event.ports && event.ports[0];
+    if (typeof path !== "string" || !/^\/read\/[\w-]+$/.test(path)) {
+      if (port) port.postMessage({ ok: false });
+      return;
+    }
+    const url = new URL(path, self.location.origin);
+    const work = Promise.all(
+      [ARTICLE_CACHE, PRECACHE].map(async (name) => {
+        const cache = await caches.open(name);
+        await cache.delete(path);
+        await cache.delete(rscKey(url));
+      })
+    )
+      .catch(() => {})
+      .then(() => {
+        if (port) port.postMessage({ ok: true });
+      });
+    event.waitUntil(work);
   }
 });

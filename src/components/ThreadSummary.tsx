@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
-import { useRouter } from "next/navigation";
 import { isOnline, netFetch, subscribeConnectivity, isNetworkError } from "@/lib/connectivity";
+import { invalidateArticleCache } from "@/lib/sw-invalidate";
 import type { StoredSummary } from "@/lib/summarize/store";
 
 /**
@@ -43,7 +43,6 @@ export function ThreadSummary({
   /** From the stored thread, when known; shown before any summary exists. */
   commentCount: number | null;
 }) {
-  const router = useRouter();
   const online = useSyncExternalStore(subscribeConnectivity, isOnline, () => true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,16 +62,24 @@ export function ThreadSummary({
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         setError(body.error ?? `Couldn't summarise (HTTP ${res.status})`);
+        setBusy(false);
         return;
       }
-      router.refresh();
+      // A full reload, not router.refresh(). The article is cache-first in the
+      // service worker, so a refresh was answered with the page as it was —
+      // and with a payload cached from a navigation, which the router could
+      // not reconcile with a refresh and wedged on. Forget the cached article
+      // first so the reload reaches the server, and let the browser start a
+      // clean router from the new document. Stays busy until the new page
+      // paints; there is nothing to hand back to.
+      await invalidateArticleCache(window.location.pathname);
+      window.location.reload();
     } catch (err) {
       setError(
         isNetworkError(err)
           ? "No connection — summaries need the network."
           : "Couldn't summarise this thread."
       );
-    } finally {
       setBusy(false);
     }
   }

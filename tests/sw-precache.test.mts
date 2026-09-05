@@ -540,5 +540,73 @@ function documentsOf(cacheStore: ReturnType<typeof makeCaches>) {
   check("a stalled queue request gives up and uses the cache", settled === "settled", String(settled));
 }
 
+// ── An article changed on the server: the page must be able to forget it ──
+// Summarise re-fetches a thread and adds the summary to the article page. The
+// article cache is cache-first, so without an invalidation the reload after
+// that press showed the page as it was and the summary appeared only after an
+// app restart.
+{
+  const responses = { "/read/a": { html: "<html>before</html>" } };
+  const { listeners, cacheStore } = loadWorker(responses);
+  // A cached entry is the stub's clone, which only has text(); read that.
+  const bodyOf = async (r: unknown) => (r as { text: () => Promise<string> }).text();
+
+  // Open the article once, as a document and as a flight payload: both cached.
+  const first = await sendFetch(listeners, "/read/a");
+  check("article document served", (await bodyOf(first)) === "<html>before</html>");
+  await sendFetch(listeners, "/read/a", { rsc: true });
+  // Also present in the precache, as it would be for a queue article.
+  await sendMessage(listeners, { type: "PRECACHE_ARTICLES", paths: ["/read/a"] });
+
+  // The server now has a different page.
+  responses["/read/a"] = { html: "<html>after</html>" };
+
+  // Without invalidation the cache-first article branch still answers stale —
+  // that is the deliberate design, and the bug this message exists to bypass.
+  const stale = await sendFetch(listeners, "/read/a");
+  check(
+    "cache-first article still serves the old copy (the reason invalidation exists)",
+    (await bodyOf(stale)) === "<html>before</html>"
+  );
+
+  // The page asks the worker to forget the article and waits for the ack.
+  const acks: unknown[] = [];
+  const pending: Promise<unknown>[] = [];
+  listeners.message({
+    data: { type: "INVALIDATE_ARTICLE", path: "/read/a" },
+    ports: [{ postMessage: (m: unknown) => acks.push(m) }],
+    waitUntil: (p: Promise<unknown>) => pending.push(p),
+  });
+  await Promise.all(pending);
+  check("INVALIDATE_ARTICLE acks on the reply port", JSON.stringify(acks) === JSON.stringify([{ ok: true }]), JSON.stringify(acks));
+
+  const articleStore = [...cacheStore.stores.entries()].find(([k]) => k.startsWith("rr-articles-"))?.[1];
+  const preStore = [...cacheStore.stores.entries()].find(([k]) => k.startsWith("rr-precache-"))?.[1];
+  check("document dropped from the article cache", !articleStore?.has("/read/a"));
+  check("flight payload dropped from the article cache", !articleStore?.has("/read/a?__rr_rsc=1"));
+  check("document dropped from the precache", !preStore?.has("/read/a"));
+  check("flight payload dropped from the precache", !preStore?.has("/read/a?__rr_rsc=1"));
+
+  const fresh = await sendFetch(listeners, "/read/a");
+  check("the reload after invalidation reaches the server", (await bodyOf(fresh)) === "<html>after</html>");
+
+  // Guards: a message handler is reachable from any script on the page.
+  const badAcks: unknown[] = [];
+  listeners.message({
+    data: { type: "INVALIDATE_ARTICLE", path: "/settings" },
+    ports: [{ postMessage: (m: unknown) => badAcks.push(m) }],
+    waitUntil: () => {},
+  });
+  check("INVALIDATE_ARTICLE refuses a non-article path", JSON.stringify(badAcks) === JSON.stringify([{ ok: false }]));
+  // No reply port at all must not throw.
+  let threw = false;
+  try {
+    listeners.message({ data: { type: "INVALIDATE_ARTICLE", path: "/read/a" }, waitUntil: () => {} });
+  } catch {
+    threw = true;
+  }
+  check("INVALIDATE_ARTICLE without a reply port is fine", !threw);
+}
+
 console.log(failed ? `\n${failed} FAILED` : `\nall passed`);
 process.exit(failed ? 1 : 0);
