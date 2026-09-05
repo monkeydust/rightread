@@ -5,6 +5,7 @@ import { classifyInput, extractFirstUrl } from "@/lib/url";
 import { netFetch, isNetworkError } from "@/lib/connectivity";
 import { enqueue } from "@/lib/outbox";
 import { Star } from "@/components/icons";
+import { Working } from "@/components/Working";
 
 /**
  * One box, two jobs: save a link, or search the library.
@@ -205,9 +206,10 @@ export function OmniBar({
           <button
             type="submit"
             disabled={saving}
-            className="shrink-0 rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-40"
+            className="inline-flex shrink-0 items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium"
             style={{ background: "var(--accent)", color: "var(--accent-ink)" }}
           >
+            {saving && <Working />}
             {saving ? "Saving…" : "Save"}
           </button>
         )}

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Working } from "@/components/Working";
 
 /**
  * Browser-sourced capture: paste a page rightread could not fetch.
@@ -164,13 +165,16 @@ export function PasteCapture({
             type="button"
             onClick={() => void submit()}
             disabled={!captured || busy}
-            className="rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-40"
+            className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium ${
+              busy ? "" : "disabled:opacity-40"
+            }`}
             style={{
               borderColor: "var(--accent)",
               background: "var(--accent)",
               color: "var(--accent-ink)",
             }}
           >
+            {busy && <Working />}
             {busy ? "Extracting…" : "Extract"}
           </button>
         </div>

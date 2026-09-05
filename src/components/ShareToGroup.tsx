@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { People } from "@/components/icons";
+import { Working } from "@/components/Working";
 import type { GroupSummary } from "@/lib/groups/access";
 
 type State = "idle" | "loading" | "error";
@@ -143,7 +144,11 @@ function SharePanel({
       style={{ background: "var(--bg)", borderColor: "var(--border)" }}
     >
       {state === "loading" && (
-        <p className="px-2 py-3 text-[13px]" style={{ color: "var(--text-muted)" }}>
+        <p
+          className="flex items-center gap-2 px-2 py-3 text-[13px]"
+          style={{ color: "var(--text-muted)" }}
+        >
+          <Working />
           Loading your groups…
         </p>
       )}

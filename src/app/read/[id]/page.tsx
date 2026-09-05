@@ -9,6 +9,7 @@ import { ShareToGroup } from "@/components/ShareToGroup";
 import { Suspense } from "react";
 import { ArticleEndings } from "@/components/ArticleEndings";
 import { ThreadSummary } from "@/components/ThreadSummary";
+import { Working } from "@/components/Working";
 import { listSummaries } from "@/lib/summarize/store";
 import { threadAdapterFor } from "@/lib/threads";
 
@@ -154,9 +155,10 @@ export default async function ReadPage(props: PageProps<"/read/[id]">) {
 
         {pending && (
           <p
-            className="mt-8 animate-pulse text-sm"
+            className="mt-8 flex items-center gap-2 text-sm"
             style={{ color: "color-mix(in srgb, var(--paper-text) 60%, transparent)" }}
           >
+            <Working />
             Extracting the article…
           </p>
         )}

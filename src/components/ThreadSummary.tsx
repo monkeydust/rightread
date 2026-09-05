@@ -3,6 +3,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { isOnline, netFetch, subscribeConnectivity, isNetworkError } from "@/lib/connectivity";
 import { invalidateArticleCache } from "@/lib/sw-invalidate";
+import { Working } from "@/components/Working";
 import type { StoredSummary } from "@/lib/summarize/store";
 
 /**
@@ -90,13 +91,18 @@ export function ThreadSummary({
       onClick={generate}
       disabled={busy || !online}
       title={!online ? "Summaries need a connection" : undefined}
-      className="rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors disabled:cursor-default disabled:opacity-50"
+      // Busy is not disabled-looking: the indicator is the state, so the
+      // button keeps its full colour while it works and only fades offline.
+      className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors disabled:cursor-default ${
+        busy ? "" : "disabled:opacity-50"
+      }`}
       style={
         latest
           ? { color: "var(--paper-text)", border: `1px solid ${RULE}` }
           : { background: "var(--accent)", color: "var(--accent-ink)" }
       }
     >
+      {busy && <Working />}
       {busy
         ? latest
           ? "Re-reading the thread…"

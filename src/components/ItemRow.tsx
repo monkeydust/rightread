@@ -8,6 +8,7 @@ import { KINDS } from "@/lib/classify/kinds";
 import { ArrowUp, ArrowDown, Star, Check, Undo, Trash } from "@/components/icons";
 import { PasteCapture } from "@/components/PasteCapture";
 import { ShareToGroup } from "@/components/ShareToGroup";
+import { Working } from "@/components/Working";
 
 type Props = {
   item: ListItem;
@@ -246,7 +247,10 @@ export function ItemRow({
           {extracting && (
             <>
               <span aria-hidden>·</span>
-              <span className="animate-pulse">extracting…</span>
+              <span className="inline-flex items-center gap-1.5">
+                <Working />
+                extracting…
+              </span>
             </>
           )}
 
