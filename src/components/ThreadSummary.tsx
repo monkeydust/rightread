@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { isOnline, netFetch, subscribeConnectivity, isNetworkError } from "@/lib/connectivity";
 import { invalidateArticleCache } from "@/lib/sw-invalidate";
 import { Working } from "@/components/Working";
@@ -50,6 +50,76 @@ export function ThreadSummary({
 
   const latest = summaries[0];
   const earlier = summaries.slice(1);
+  const path = `/read/${itemId}`;
+
+  /**
+   * The server is the source of truth about "working". The button's own
+   * state dies with the component the moment you tap back to the queue, but
+   * the generation does not — so on every mount, ask. Three outcomes:
+   *
+   *  - running: show the indicator and poll until it is not, then show the
+   *    result the same way a fresh press does.
+   *  - not running, but the newest stored summary is not the one this page
+   *    was rendered with: the page came from the cache and is behind. Reload
+   *    once (guarded, so a cache that will not clear cannot loop it).
+   *  - otherwise nothing.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const guard = `rr:summary-reloaded:${itemId}`;
+
+    const status = async () => {
+      const res = await netFetch(`/api/items/${itemId}/summary`).catch(() => null);
+      if (!res?.ok) return null;
+      return (await res.json().catch(() => null)) as
+        | { running: boolean; latestId: string | null }
+        | null;
+    };
+
+    const showResult = async () => {
+      if (cancelled || window.location.pathname !== path) return;
+      try {
+        if (sessionStorage.getItem(guard)) return;
+        sessionStorage.setItem(guard, "1");
+      } catch {
+        /* no sessionStorage: reload anyway, once is the common case */
+      }
+      await invalidateArticleCache(path);
+      window.location.reload();
+    };
+
+    void (async () => {
+      const first = await status();
+      if (cancelled || !first) return;
+
+      if (!first.running) {
+        // This render matched the server: any earlier reload did its job.
+        if (first.latestId === (latest?.id ?? null)) {
+          try {
+            sessionStorage.removeItem(guard);
+          } catch {}
+          return;
+        }
+        await showResult();
+        return;
+      }
+
+      setBusy(true);
+      while (!cancelled) {
+        await new Promise((r) => setTimeout(r, 2500));
+        const now = await status();
+        if (cancelled) return;
+        if (now && !now.running) {
+          await showResult();
+          return;
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [itemId, path, latest?.id]);
 
   async function generate() {
     setBusy(true);
@@ -66,14 +136,19 @@ export function ThreadSummary({
         setBusy(false);
         return;
       }
-      // A full reload, not router.refresh(). The article is cache-first in the
-      // service worker, so a refresh was answered with the page as it was —
-      // and with a payload cached from a navigation, which the router could
-      // not reconcile with a refresh and wedged on. Forget the cached article
-      // first so the reload reaches the server, and let the browser start a
-      // clean router from the new document. Stays busy until the new page
-      // paints; there is nothing to hand back to.
-      await invalidateArticleCache(window.location.pathname);
+      // Still here? A full reload, not router.refresh(). The article is
+      // cache-first in the service worker, so a refresh was answered with the
+      // page as it was — and with a payload cached from a navigation, which the
+      // router could not reconcile with a refresh and wedged on. Forget the
+      // cached article first so the reload reaches the server, and let the
+      // browser start a clean router from the new document. Stays busy until
+      // the new page paints; there is nothing to hand back to.
+      //
+      // Tapped away meanwhile? Then this page is gone and the effect above
+      // takes over when you come back — reloading whatever you are looking at
+      // now would be the wrong page.
+      if (window.location.pathname !== path) return;
+      await invalidateArticleCache(path);
       window.location.reload();
     } catch (err) {
       setError(

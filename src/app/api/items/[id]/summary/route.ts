@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { prisma } from "@/lib/db";
 import { LLMUnavailableError } from "@/lib/openrouter";
 import { NotSummarisableError } from "@/lib/summarize";
 import {
@@ -29,6 +30,34 @@ export const dynamic = "force-dynamic";
  * gets the same row back.
  */
 const inFlight = new Map<string, Promise<StoredSummary>>();
+
+/**
+ * GET: is a summary being generated for this item right now, and which is the
+ * newest one stored? The reader asks on every open of a conversation page, so
+ * a summary started before you tapped away — or before the app was closed —
+ * is still shown as in progress when you come back, and a page rendered from
+ * a cached copy can tell that it is behind. Cheap: the in-flight map is
+ * in-memory and the newest-id lookup is one indexed row, scoped by owner.
+ */
+export async function GET(
+  _request: Request,
+  ctx: RouteContext<"/api/items/[id]/summary">
+) {
+  const session = await auth();
+  const userId = session?.user?.id;
+  if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id } = await ctx.params;
+  const latest = await prisma.itemSummary.findFirst({
+    where: { userId, itemId: id },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  return Response.json({
+    running: inFlight.has(`${userId}:${id}`),
+    latestId: latest?.id ?? null,
+  });
+}
 
 export async function POST(
   _request: Request,
