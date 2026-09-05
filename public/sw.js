@@ -2,7 +2,10 @@
  * rightread service worker.
  *
  * The point is offline reading, so the strategy is deliberately narrow:
- *  - /read/<id> pages   → stale-while-revalidate; once read, readable offline
+ *  - /read/<id> pages   → stale-while-revalidate while the copy is from this
+ *                          build; network-first once a deploy has passed it
+ *                          (see "Which build is a cached page from?" below).
+ *                          Once read, readable offline either way.
  *  - the top of the queue → precached ahead of time, readable before ever opened
  *  - other navigations  → network-first, falling back to cache, then /offline
  *  - static assets      → cache-first
@@ -17,7 +20,7 @@
 // Bump on any change to styling or markup: cached article HTML references
 // hashed CSS/font URLs, and stale HTML pointing at deleted chunks renders
 // unstyled. Activation deletes every shell/asset cache not matching this.
-const VERSION = "v30";
+const VERSION = "v31";
 
 /*
  * Downloaded articles are versioned SEPARATELY, and this is the whole point.
@@ -104,8 +107,109 @@ self.addEventListener("activate", (event) => {
         )
       )
       .then(() => self.clients.claim())
+      // After claiming, not before: pages should not wait on this.
+      .then(() => healStaleArticles())
   );
 });
+
+/*
+ * ── Which build is a cached page from? ─────────────────────────────
+ *
+ * Articles are cached under DATA_VERSION so a deploy does not delete the
+ * offline library. But a cached article page is not just text: it is the
+ * HTML (or router payload) of the build it was saved under, and it names that
+ * build's script chunks. Served after a deploy it runs the previous build's
+ * code — or 404s on chunks that no longer exist. In practice that meant every
+ * fix shipped to the reader was invisible on any article already opened once:
+ * the page came from the cache, and the cache was a fossil.
+ *
+ * Next writes its build id into every page and payload ("b":"<id>"), and the
+ * /offline page precached at install carries the current one. So the worker
+ * can tell a cached article from this build (serve it at once, as before)
+ * from one saved under an older build (go to the network first, keep the
+ * copy only as the offline fallback). The id is also re-learned from any
+ * fresh page the worker stores, so it tracks the server even when a deploy
+ * did not change this file.
+ */
+const BUILD_KEY = "/__rr_build";
+let knownBuild = null;
+
+function buildIdIn(text) {
+  // Escaped inside the HTML's inline script, bare in a flight payload.
+  const m = text.match(/\\?"b\\?":\\?"([A-Za-z0-9_-]+)\\?"/);
+  return m ? m[1] : null;
+}
+
+async function buildIdOf(response) {
+  try {
+    return buildIdIn(await response.clone().text());
+  } catch {
+    return null;
+  }
+}
+
+async function currentBuild() {
+  if (knownBuild) return knownBuild;
+  try {
+    const shell = await caches.open(SHELL_CACHE);
+    const stored = await shell.match(BUILD_KEY);
+    if (stored) knownBuild = (await stored.text()) || null;
+    if (!knownBuild) {
+      const offline = await shell.match(OFFLINE_URL);
+      if (offline) knownBuild = await buildIdOf(offline);
+      if (knownBuild) await shell.put(BUILD_KEY, new Response(knownBuild));
+    }
+  } catch {
+    // Unknown is a safe answer: it means "cannot tell", and cached is served.
+  }
+  return knownBuild;
+}
+
+/** Learns the build from a page the worker just fetched fresh. */
+async function noteBuild(response) {
+  const id = await buildIdOf(response);
+  if (!id || id === knownBuild) return;
+  knownBuild = id;
+  try {
+    const shell = await caches.open(SHELL_CACHE);
+    await shell.put(BUILD_KEY, new Response(id));
+  } catch {
+    // Memory still has it for this worker's lifetime.
+  }
+}
+
+/** False only when both sides are known and differ. */
+async function isCurrentBuild(cached) {
+  const [current, own] = await Promise.all([currentBuild(), buildIdOf(cached)]);
+  return !current || !own || current === own;
+}
+
+/**
+ * Re-fetches offline articles saved under an older build, so the library is
+ * readable after a deploy rather than a set of pages pointing at chunks that
+ * are gone. Runs once per activation, sequentially, capped, and not on a
+ * connection the person has marked as metered.
+ */
+async function healStaleArticles() {
+  try {
+    if (self.navigator && self.navigator.connection && self.navigator.connection.saveData) return;
+    let budget = 40;
+    for (const name of [ARTICLE_CACHE, PRECACHE]) {
+      const cache = await caches.open(name);
+      for (const request of await cache.keys()) {
+        if (budget <= 0) return;
+        const url = new URL(request.url);
+        if (!isArticle(url) || url.search) continue; // documents only; the payload follows
+        const cached = await cache.match(request);
+        if (!cached || (await isCurrentBuild(cached))) continue;
+        budget--;
+        await precacheOne(cache, url.pathname);
+      }
+    }
+  } catch {
+    // Best-effort. A page left stale is served network-first on open anyway.
+  }
+}
 
 function isArticle(url) {
   return url.pathname.startsWith("/read/");
@@ -240,15 +344,20 @@ self.addEventListener("fetch", (event) => {
               !isPrefetch(request)
             ) {
               articles.put(key, response.clone());
+              event.waitUntil(noteBuild(response.clone()));
             }
             return response;
           })
           .catch(() => null);
 
-        if (cached) {
+        // A copy from this build is served at once. One from an older build
+        // is a fossil: it would run code the server has since replaced, so
+        // the network goes first and the copy is only the offline fallback.
+        if (cached && (await isCurrentBuild(cached))) {
           event.waitUntil(network);
           return cached;
         }
+        if (cached) return (await network) ?? cached;
 
         // Nothing held and nothing to fetch. A network error is the honest
         // answer, and it is also the useful one: the router responds to a
@@ -286,6 +395,7 @@ self.addEventListener("fetch", (event) => {
           // Kept only so the list is there at all offline; never preferred
           // while a network exists.
           if (!isPrefetch(request)) shell.put(key, fresh.clone());
+          event.waitUntil(noteBuild(fresh.clone()));
           return fresh;
         }
         // Anything the server did answer that we would not cache — a redirect
@@ -318,15 +428,19 @@ self.addEventListener("fetch", (event) => {
             // page in place of the article.
             if (response.ok && response.type === "basic" && !response.redirected) {
               cache.put(request, response.clone());
+              event.waitUntil(noteBuild(response.clone()));
             }
             return response;
           })
           .catch(() => null);
 
-        if (cached) {
+        // Same rule as the payload branch: this build's copy at once, an
+        // older build's copy only when the network cannot answer.
+        if (cached && (await isCurrentBuild(cached))) {
           event.waitUntil(network);
           return cached;
         }
+        if (cached) return (await network) ?? cached;
         return (await network) ?? caches.match(OFFLINE_URL);
       })
     );
@@ -356,6 +470,7 @@ self.addEventListener("fetch", (event) => {
           if (response.ok && !response.redirected) {
             const copy = response.clone();
             caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy));
+            event.waitUntil(noteBuild(response.clone()));
           }
           return response;
         })

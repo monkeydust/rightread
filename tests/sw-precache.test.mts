@@ -96,15 +96,42 @@ function loadWorker(responses: Record<string, Opts> = {}) {
     fetched.push(init?.headers?.RSC === "1" ? `${path}#rsc` : path);
     const o = responses[path] ?? {};
     const html = o.html ?? "<html></html>";
-    return {
-      ok: o.ok ?? true,
-      redirected: o.redirected ?? false,
-      type: "basic",
-      clone: () => ({ text: async () => html }),
-      text: async () => html,
-      body: html,
-    };
+    return mkResponse(o, html);
   };
+
+  // A response whose clone is a full response again, so the worker can read
+  // the body of a cached copy (it does, to find the build id) the same way it
+  // reads a fresh one.
+  const mkResponse = (o: Opts, html: string): Record<string, unknown> => ({
+    ok: o.ok ?? true,
+    redirected: o.redirected ?? false,
+    type: "basic",
+    clone: () => mkResponse(o, html),
+    text: async () => html,
+    body: html,
+  });
+
+  // The worker constructs `new Response(text)` to remember the build id, and
+  // calls `Response.error()` as the last resort when there is nothing cached
+  // and no network to ask.
+  class ResponseStub {
+    private readonly value: string;
+    ok = true;
+    redirected = false;
+    type = "basic";
+    constructor(value: string) {
+      this.value = String(value);
+    }
+    async text() {
+      return this.value;
+    }
+    clone() {
+      return new ResponseStub(this.value);
+    }
+    static error() {
+      return { networkError: true };
+    }
+  }
 
   const sandbox = {
     self: {
@@ -117,9 +144,7 @@ function loadWorker(responses: Record<string, Opts> = {}) {
     },
     caches: cacheStore,
     fetch: fetchStub,
-    // Only `error()` is used, as the last resort when there is nothing cached
-    // and no network to ask.
-    Response: { error: () => ({ networkError: true }) },
+    Response: ResponseStub,
     URL,
     Set,
     Map,
@@ -135,10 +160,34 @@ function loadWorker(responses: Record<string, Opts> = {}) {
     clearTimeout,
   };
 
+  // install() uses cache.addAll, which the bare store lacks: fetch through the
+  // same stub so the shell cache holds whatever the "server" says /offline is.
+  const rawOpen = cacheStore.open;
+  cacheStore.open = async (name: string) => {
+    const c = await rawOpen(name);
+    return {
+      ...c,
+      addAll: async (paths: string[]) => {
+        for (const p of paths) await c.put(p, await fetchStub(p));
+      },
+    };
+  };
+
   const context = createContext(sandbox);
   runInContext(readFileSync("public/sw.js", "utf8"), context);
-  return { listeners, fetched, cacheStore, net };
+  return { listeners, fetched, cacheStore, net, mkResponse };
 }
+
+/** Fires a lifecycle listener (install/activate) and awaits its waitUntil. */
+async function lifecycle(listeners: Record<string, (e: unknown) => void>, type: string) {
+  const pending: Promise<unknown>[] = [];
+  listeners[type]({ waitUntil: (p: Promise<unknown>) => pending.push(p) });
+  await Promise.all(pending);
+}
+
+/** A page as Next renders it: the build id sits escaped in an inline script. */
+const pageOf = (build: string, marker: string) =>
+  `<html><script>self.__next_f.push([1,"0:{\\"P\\":null,\\"b\\":\\"${build}\\"}"])</script>${marker}</html>`;
 
 /** Drives the fetch listener and returns whatever it responded with. */
 async function sendFetch(
@@ -606,6 +655,97 @@ function documentsOf(cacheStore: ReturnType<typeof makeCaches>) {
     threw = true;
   }
   check("INVALIDATE_ARTICLE without a reply port is fine", !threw);
+}
+
+// ── A cached article from an older build is a fossil, not a fast path ──
+// Articles are cached under DATA_VERSION so a deploy keeps the library, but a
+// cached page names the chunks of the build it was saved under. Served after a
+// deploy it runs code the server has replaced — every fix shipped to the reader
+// was invisible on any article already opened once. The worker now reads the
+// build id out of the copy and the current one out of the shell it installed.
+{
+  const { listeners, cacheStore, fetched, net, mkResponse } = loadWorker({
+    "/offline": { html: pageOf("B", "offline") },
+    "/manifest.webmanifest": { html: "{}" },
+    "/read/a": { html: pageOf("B", "fresh-from-B") },
+  });
+  await lifecycle(listeners, "install"); // shell now knows the server is on B
+  const bodyOf = async (r: unknown) => (r as { text: () => Promise<string> }).text();
+
+  // A copy saved under build A, as the phone would hold after a deploy.
+  const articles = await cacheStore.open("rr-articles-d1");
+  await articles.put("/read/a", mkResponse({}, pageOf("A", "fossil-from-A")));
+
+  const served = await sendFetch(listeners, "/read/a");
+  check("an article cached under an older build is fetched fresh", (await bodyOf(served)).includes("fresh-from-B"), await bodyOf(served));
+  check("and the fresh copy replaces the fossil", (await bodyOf(await articles.match("/read/a"))).includes("fresh-from-B"));
+
+  // Same build: served at once from the cache, as before.
+  fetched.length = 0;
+  await articles.put("/read/a", mkResponse({}, pageOf("B", "cached-from-B")));
+  const instant = await sendFetch(listeners, "/read/a");
+  check("an article cached under this build is served from the cache", (await bodyOf(instant)).includes("cached-from-B"));
+
+  // Older build but no network: the fossil is still better than nothing.
+  await articles.put("/read/a", mkResponse({}, pageOf("A", "fossil-from-A")));
+  net.offline = true;
+  const fallback = await sendFetch(listeners, "/read/a");
+  check("offline, an older-build copy is still served", (await bodyOf(fallback)).includes("fossil-from-A"));
+  net.offline = false;
+
+  // The flight payload follows the same rule.
+  await articles.put("/read/a?__rr_rsc=1", mkResponse({}, `0:{"b":"A"}payload-from-A`));
+  const payload = await sendFetch(listeners, "/read/a", { rsc: true });
+  check("an older-build flight payload is fetched fresh too", (await bodyOf(payload)).includes("fresh-from-B"));
+}
+
+// ── The build id is re-learned from fresh pages, not only at install ──
+// A deploy that does not touch sw.js installs no new worker, so the shell's
+// /offline still names the old build. The first fresh page the worker stores
+// corrects it, and cached articles from the old build stop being trusted.
+{
+  const { listeners, cacheStore, mkResponse } = loadWorker({
+    "/offline": { html: pageOf("A", "offline") },
+    "/manifest.webmanifest": { html: "{}" },
+    "/": { html: `0:{"b":"B"}queue` },
+    "/read/a": { html: pageOf("B", "fresh-from-B") },
+  });
+  await lifecycle(listeners, "install"); // shell thinks: A
+  const bodyOf = async (r: unknown) => (r as { text: () => Promise<string> }).text();
+  const articles = await cacheStore.open("rr-articles-d1");
+  await articles.put("/read/a", mkResponse({}, pageOf("A", "cached-from-A")));
+
+  // Opening the queue (network-first) hands the worker a page from build B.
+  await sendFetch(listeners, "/", { rsc: true });
+  await new Promise((r) => setTimeout(r, 20)); // noteBuild runs off waitUntil
+
+  const served = await sendFetch(listeners, "/read/a");
+  check("after seeing a newer build, older-build articles go network-first", (await bodyOf(served)).includes("fresh-from-B"), await bodyOf(served));
+}
+
+// ── Activation heals the offline library ──────────────────────────
+// A new worker means a deploy happened. Anything held under the old build is
+// re-fetched in the background so it is readable offline afterwards, instead
+// of being a page whose chunks no longer exist.
+{
+  const { listeners, cacheStore, fetched, mkResponse } = loadWorker({
+    "/offline": { html: pageOf("B", "offline") },
+    "/manifest.webmanifest": { html: "{}" },
+    "/read/old": { html: pageOf("B", "healed") },
+    "/read/fine": { html: pageOf("B", "already-fine") },
+  });
+  await lifecycle(listeners, "install");
+  const bodyOf = async (r: unknown) => (r as { text: () => Promise<string> }).text();
+  const pre = await cacheStore.open("rr-precache-d1");
+  await pre.put("/read/old", mkResponse({}, pageOf("A", "stale")));
+  await pre.put("/read/fine", mkResponse({}, pageOf("B", "current")));
+
+  fetched.length = 0;
+  await lifecycle(listeners, "activate");
+
+  check("activation re-fetches the stale-build article", fetched.includes("/read/old") && fetched.includes("/read/old#rsc"), fetched.join(","));
+  check("and leaves the current-build one alone", !fetched.includes("/read/fine"));
+  check("the healed copy is from the new build", (await bodyOf(await pre.match("/read/old"))).includes("healed"));
 }
 
 console.log(failed ? `\n${failed} FAILED` : `\nall passed`);

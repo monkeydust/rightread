@@ -79,6 +79,16 @@ degraded one. Three rules, each of which was learned the hard way:
   meant every deploy deleted every reader's offline library — a CSS tweak
   throwing away the megabyte someone downloaded precisely so they could read it
   without a network.
+- **A cached article page belongs to a build.** It is the HTML of the build
+  it was saved under and names that build's chunks, so served after a deploy
+  it runs code the server has replaced — every fix shipped to the reader was
+  invisible on any article already opened once. The worker reads Next's
+  build id (`"b":"…"`) out of each cached copy and knows the current one from
+  the shell it installed (and from any fresh page it stores): a copy from
+  this build is served at once, a copy from an older build goes network-first
+  and is only the offline fallback, and activation re-fetches stale ones in
+  the background. Do not "simplify" the article branches back to plain
+  cache-first.
 - **Every network call must be able to give up.** Aeroplane wi-fi associates
   without routing, so `navigator.onLine` is true and requests are accepted and
   then black-holed: a bare `fetch` neither resolves nor rejects, and anything
