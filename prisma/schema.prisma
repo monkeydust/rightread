@@ -139,6 +139,12 @@ model Item {
   fromGroupName String?
   fromGroup     Group?  @relation(fields: [fromGroupId], references: [id], onDelete: SetNull)
 
+  /// Written by Compact (src/lib/compact/), not captured: a synthesis of the
+  /// unread items it archived, linking each one. Its url is a synthetic
+  /// rightread address with nothing behind it, so the UI hides "Original",
+  /// sharing and the kind chip for these rows.
+  digest Boolean @default(false)
+
   /// unread | archived
   status   String    @default("unread")
   /// A marker you can filter by — deliberately NOT an ordering bucket.
