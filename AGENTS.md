@@ -67,6 +67,25 @@ service rather than a substitute for reading. Rules:
   without an adapter take the page path: ordinary re-extraction, no comment
   count. Reddit blocks server fetches entirely and stays on the paste path.
 
+## Compact
+Header → Compact (`/compact`, `src/lib/compact/`). Archives every unread,
+**unstarred** item saved more than 7 days ago and puts one `digest` Item at the
+top of the queue: a themed synthesis whose `[n]` citations link `/read/<id>`
+of the archived copies, then a numbered list of every one of them.
+
+- **Archive first, model second.** The archive and the digest row (already
+  holding the full list) are one transaction before any model call. The essay
+  is written in the background and only replaces the list; if it fails the
+  list stays, with a note. A restart mid-write is settled at boot.
+- **The model writes text, never markup or URLs.** `lib/compact/digest.ts`
+  escapes it and turns `[n]` into links to ids we supplied; an invented number
+  is dropped. The result still goes through `sanitizeArticleHtml`, with
+  `internalPrefix` so in-app links keep the tab (a new tab leaves the PWA).
+- **Preview, then confirm, online only.** Not an outbox operation: "older than
+  a week" is relative to when it runs, so it cannot be replayed.
+- A digest's `url` is synthetic. Rows with `digest: true` hide Original, the
+  kind chip, sharing and the recommendations panel.
+
 ## Offline
 The app is meant to be read on a plane, so offline is a first-class mode, not a
 degraded one. Three rules, each of which was learned the hard way:

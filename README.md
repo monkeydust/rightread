@@ -64,6 +64,11 @@ adjustable size and width, light/sepia/dark, and it remembers where you stopped.
 **Prioritise.** One ordered queue with move up/down, a star for things that
 matter, and an archive for things you've finished.
 
+**Compact the backlog.** One button archives everything unread from more
+than a week ago (starred items stay) and leaves a single digest at the top of
+the queue: what the pile was about, by theme, with a link to every archived
+article. Nothing is deleted.
+
 **Bring things to you.** Add sites to watch and topics you care about, and
 matching articles collect under Discover.
 

@@ -147,6 +147,12 @@ export function ItemRow({
           className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]"
           style={{ color: "var(--text-muted)" }}
         >
+          {/* A digest has no kind, no original and no sharing: it is a page
+              rightread wrote, and only links back into the library. */}
+          {item.digest ? (
+            <span style={{ color: "var(--accent)" }}>digest</span>
+          ) : (
+          <>
           {/* Kind doubles as its own override control — a plain select, so
               correcting a misclassification is one tap and it sticks. */}
           <span className="relative inline-flex items-center">
@@ -200,6 +206,8 @@ export function ItemRow({
           >
             {item.siteName || hostLabel(item.url)} ↗
           </a>
+          </>
+          )}
 
           {/* Where it came from, next to where it came from. The name is stored
               on the item, so this still reads correctly after you leave the
@@ -249,7 +257,7 @@ export function ItemRow({
               <span aria-hidden>·</span>
               <span className="inline-flex items-center gap-1.5">
                 <Working />
-                extracting…
+                {item.digest ? "writing…" : "extracting…"}
               </span>
             </>
           )}
@@ -299,12 +307,14 @@ export function ItemRow({
       <div className="flex shrink-0 items-center gap-0.5">
         {/* Sharing starts here, from something you actually saved — the group
             shelf has no paste box. */}
-        <ShareToGroup
-          url={item.url}
-          title={item.title}
-          variant="icon"
-          disabled={busy}
-        />
+        {!item.digest && (
+          <ShareToGroup
+            url={item.url}
+            title={item.title}
+            variant="icon"
+            disabled={busy}
+          />
+        )}
         <IconButton
           label={item.starred ? "Remove star" : "Star"}
           onClick={() => onStar(item.id, !item.starred)}

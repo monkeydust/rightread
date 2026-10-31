@@ -42,6 +42,13 @@ export async function register() {
     console.log(`[auth] allow list: ${allowed.join(", ")} (${allowed.length})`);
   }
 
+  // A digest whose essay was mid-write when the last container stopped still
+  // holds its full list; stop showing it as in progress.
+  const { settleInterruptedDigests } = await import("@/lib/compact");
+  await settleInterruptedDigests().catch((e) =>
+    console.error(`[compact] could not settle digests at boot: ${e}`)
+  );
+
   // Imported dynamically so the edge bundle never sees Prisma or jsdom.
   const { refreshAllSources } = await import("@/lib/sources/refresh");
 

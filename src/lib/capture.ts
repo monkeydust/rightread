@@ -13,7 +13,7 @@ import { embed, embeddableText, toBlob, EMBED_MODEL } from "@/lib/search/embed";
  * New items go to the top of the queue. Positions are sparse floats, so this
  * is one read plus one write regardless of library size.
  */
-async function topPosition(userId: string): Promise<number> {
+export async function topPosition(userId: string): Promise<number> {
   const first = await prisma.item.findFirst({
     where: { userId },
     orderBy: { position: "asc" },

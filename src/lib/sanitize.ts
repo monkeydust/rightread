@@ -46,11 +46,16 @@ function absolutizeUrls(doc: Document, baseUrl: string) {
  * @param window  a jsdom window; DOMPurify needs a real DOM to work against
  * @param html    raw article HTML from Readability
  * @param baseUrl the article URL, used to absolutize relative references
+ * @param options.internalPrefix links starting with this (after absolutizing)
+ *        point back into the app — a digest's links to archived items — and
+ *        keep the reader's own tab instead of opening a new one. In an
+ *        installed PWA a new tab means leaving the app for a browser.
  */
 export function sanitizeArticleHtml(
   window: DOMWindow,
   html: string,
-  baseUrl: string
+  baseUrl: string,
+  options: { internalPrefix?: string } = {}
 ): string {
   // jsdom's DOMWindow satisfies DOMPurify's WindowLike at runtime, but the two
   // type definitions are structurally independent.
@@ -63,8 +68,14 @@ export function sanitizeArticleHtml(
   // External links open in a new tab and must not leak window.opener.
   purify.addHook("afterSanitizeAttributes", (node) => {
     if (node.nodeName === "A" && node.hasAttribute("href")) {
-      node.setAttribute("target", "_blank");
-      node.setAttribute("rel", "noopener noreferrer nofollow");
+      const href = node.getAttribute("href") ?? "";
+      if (options.internalPrefix && href.startsWith(options.internalPrefix)) {
+        node.removeAttribute("target");
+        node.removeAttribute("rel");
+      } else {
+        node.setAttribute("target", "_blank");
+        node.setAttribute("rel", "noopener noreferrer nofollow");
+      }
     }
     if (node.nodeName === "IMG") {
       node.setAttribute("loading", "lazy");

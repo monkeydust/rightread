@@ -91,6 +91,15 @@ export function AppShell({
             >
               Settings
             </Link>
+            {/* Archive the week-old backlog into one digest. Opens a preview;
+                nothing moves until it is confirmed there. */}
+            <Link
+              href="/compact"
+              className={headerAction}
+              style={headerActionStyle}
+            >
+              Compact
+            </Link>
             {/* Graph sits up here rather than in the tab bar: it is a way of
                 looking at the library, not another list to read from, and the
                 tabs were getting crowded enough on a phone to start wrapping. */}

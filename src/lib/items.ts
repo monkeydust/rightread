@@ -22,6 +22,7 @@ const LIST_FIELDS = {
   recommended: true,
   fromGroupId: true,
   fromGroupName: true,
+  digest: true,
   savedAt: true,
 } as const;
 
@@ -48,6 +49,8 @@ export type ListItem = {
   fromGroupId: string | null;
   /** Kept beside the id so the chip survives leaving or deleting the group. */
   fromGroupName: string | null;
+  /** Written by Compact rather than captured; see lib/compact. */
+  digest: boolean;
   savedAt: Date;
 };
 

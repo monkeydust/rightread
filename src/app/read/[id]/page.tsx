@@ -10,6 +10,7 @@ import { Suspense } from "react";
 import { ArticleEndings } from "@/components/ArticleEndings";
 import { ThreadSummary } from "@/components/ThreadSummary";
 import { Working } from "@/components/Working";
+import { DigestPending } from "@/components/DigestPending";
 import { listSummaries } from "@/lib/summarize/store";
 import { threadAdapterFor } from "@/lib/threads";
 
@@ -70,17 +71,22 @@ export default async function ReadPage(props: PageProps<"/read/[id]">) {
             {/* Always available, not just when extraction failed — the reader
                 strips things (video, interactive charts, comments) that you
                 sometimes need the real page for. */}
-            <a
-              href={item.resolvedUrl ?? item.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Open the original page"
-              className="rounded-md px-2 py-1.5 text-[13px] font-medium hover:bg-[var(--bg-subtle)]"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Original ↗
-            </a>
-            <ShareToGroup url={item.url} title={item.title} />
+            {/* A digest has no original page and is not worth a shelf. */}
+            {!item.digest && (
+              <>
+                <a
+                  href={item.resolvedUrl ?? item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Open the original page"
+                  className="rounded-md px-2 py-1.5 text-[13px] font-medium hover:bg-[var(--bg-subtle)]"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  Original ↗
+                </a>
+                <ShareToGroup url={item.url} title={item.title} />
+              </>
+            )}
             <ReaderControls
               itemId={item.id}
               title={item.title}
@@ -108,14 +114,18 @@ export default async function ReadPage(props: PageProps<"/read/[id]">) {
         >
           {item.byline && <span>{item.byline}</span>}
           {item.byline && <span aria-hidden>·</span>}
-          <a
-            href={item.resolvedUrl ?? item.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline underline-offset-2 hover:no-underline"
-          >
-            {item.siteName || hostLabel(item.url)}
-          </a>
+          {item.digest ? (
+            <span>rightread digest</span>
+          ) : (
+            <a
+              href={item.resolvedUrl ?? item.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-2 hover:no-underline"
+            >
+              {item.siteName || hostLabel(item.url)}
+            </a>
+          )}
           {item.wordCount ? (
             <>
               <span aria-hidden>·</span>
@@ -153,7 +163,9 @@ export default async function ReadPage(props: PageProps<"/read/[id]">) {
           />
         )}
 
-        {pending && (
+        {pending && item.digest && <DigestPending itemId={item.id} />}
+
+        {pending && !item.digest && (
           <p
             className="mt-8 flex items-center gap-2 text-sm"
             style={{ color: "color-mix(in srgb, var(--paper-text) 60%, transparent)" }}
@@ -202,7 +214,7 @@ export default async function ReadPage(props: PageProps<"/read/[id]">) {
             awaited inline and blocked the text behind the candidate scan. A
             null fallback means the reader simply ends until the panel lands. */}
         <Suspense fallback={null}>
-          <ArticleEndings userId={session.user.id} itemId={item.id} />
+          {!item.digest && <ArticleEndings userId={session.user.id} itemId={item.id} />}
         </Suspense>
       </article>
     </div>
