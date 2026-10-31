@@ -69,7 +69,8 @@ service rather than a substitute for reading. Rules:
 
 ## Compact
 Header → Compact (`/compact`, `src/lib/compact/`). Archives every unread,
-**unstarred** item saved more than 7 days ago and puts one `digest` Item at the
+**unstarred, non-digest** item saved more than 7 days ago (a digest is never
+compacted; it leaves the queue only when archived by hand) and puts one `digest` Item at the
 top of the queue: a themed synthesis whose `[n]` citations link `/read/<id>`
 of the archived copies, then a numbered list of every one of them.
 

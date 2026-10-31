@@ -28,6 +28,7 @@ import {
  * even if the summariser never answers. The essay is written afterwards, in
  * the background, and only ever replaces that list with something better.
  * Starred items are left alone: a star is the one explicit "this matters".
+ * Digests are left alone too (see eligible).
  */
 
 export const COMPACT_AGE_DAYS = 7;
@@ -43,8 +44,13 @@ export function compactCutoff(now = new Date()): Date {
   return new Date(now.getTime() - COMPACT_AGE_DAYS * 24 * 60 * 60 * 1000);
 }
 
+/**
+ * Digests are never compacted: they are the record of earlier compactions,
+ * and summarising a summary says nothing new. They leave the queue only when
+ * you archive them yourself.
+ */
 function eligible(userId: string, cutoff: Date) {
-  return { userId, status: "unread", starred: false, savedAt: { lt: cutoff } };
+  return { userId, status: "unread", starred: false, digest: false, savedAt: { lt: cutoff } };
 }
 
 export async function previewCompaction(userId: string, now = new Date()) {
@@ -53,7 +59,7 @@ export async function previewCompaction(userId: string, now = new Date()) {
     prisma.item.findMany({
       where: eligible(userId, cutoff),
       orderBy: { savedAt: "asc" },
-      select: { id: true, title: true, siteName: true, url: true, savedAt: true, digest: true },
+      select: { id: true, title: true, siteName: true, url: true, savedAt: true },
     }),
     prisma.item.count({
       where: { userId, status: "unread", starred: true, savedAt: { lt: cutoff } },
@@ -81,25 +87,20 @@ export async function compact(userId: string, now = new Date()) {
       textContent: true,
       wordCount: true,
       savedAt: true,
-      digest: true,
     },
   });
   if (rows.length === 0) throw new NothingToCompactError("Nothing older than a week to compact.");
 
-  // An older digest still unread is archived like anything else, but it is
-  // not an article: summarising a summary says nothing new.
-  const sources: DigestSource[] = rows
-    .filter((r) => !r.digest)
-    .map((r) => ({
-      id: r.id,
-      title: r.title,
-      siteName: r.siteName,
-      url: r.url,
-      excerpt: r.excerpt,
-      text: r.textContent,
-      wordCount: r.wordCount,
-      savedAt: r.savedAt,
-    }));
+  const sources: DigestSource[] = rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    siteName: r.siteName,
+    url: r.url,
+    excerpt: r.excerpt,
+    text: r.textContent,
+    wordCount: r.wordCount,
+    savedAt: r.savedAt,
+  }));
 
   const origin = appOrigin();
   const listHtml = cleanHtml(

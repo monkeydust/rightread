@@ -56,10 +56,7 @@ export default async function CompactPage() {
                 className="flex items-baseline justify-between gap-3 border-b py-2"
                 style={{ borderColor: "var(--border)" }}
               >
-                <span className="min-w-0 truncate">
-                  {item.digest ? "Earlier digest: " : ""}
-                  {item.title}
-                </span>
+                <span className="min-w-0 truncate">{item.title}</span>
                 <span className="shrink-0" style={muted}>
                   {item.siteName || hostLabel(item.url)} · {day(item.savedAt)}
                 </span>
