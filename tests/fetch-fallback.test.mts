@@ -16,14 +16,18 @@ import {
   cleanPages,
   fetchViaFallback,
   nextPageUrl,
+  planNextPage,
   shouldUseFallback,
 } from "../src/lib/fetch-fallback/index.ts";
 
 let failed = 0;
+// Bound now, before captureLogs() swaps console.log out: a check made while
+// the module's log lines are being captured must still print its result.
+const print = console.log.bind(console);
 function check(name: string, ok: boolean, detail = "") {
   if (!ok) failed++;
-  console.log(`${ok ? "PASS" : "FAIL"}  ${name}`);
-  if (!ok && detail) console.log(`      ${detail}`);
+  print(`${ok ? "PASS" : "FAIL"}  ${name}`);
+  if (!ok && detail) print(`      ${detail}`);
 }
 
 const KEY = "test-key-not-a-real-one";
@@ -454,6 +458,94 @@ async function codeOf(run: () => Promise<unknown>): Promise<string> {
   check("a javascript: lead image is not stored", article.leadImage === null, String(article.leadImage));
   check("an off-host next page is not followed", tf.calls.length === 1, `${tf.calls.length}`);
   check("site name is read from page metadata", article.siteName === "Garden Forum", String(article.siteName));
+}
+
+// ── Pagination that does not depend on the link list ──────────────
+// The first production save stored one page of a 25-page thread and logged
+// only "pages=1 outcome=ok". These pin both halves of the answer: the walk no
+// longer needs `links`, and the log line says why it stopped.
+{
+  const base = { url: THREAD, finalUrl: THREAD, title: null, description: null, author: null, publishedDate: null, siteName: null, leadImage: null, html: "", links: [] as string[], pageNumber: null as number | null, pageTotal: null as number | null };
+
+  const built = planNextPage({ ...base, pageNumber: 1, pageTotal: 25 }, THREAD);
+  check("no links but page-total says more: page 2 is built", built.url === `${THREAD}?page=2` && built.via === "built", JSON.stringify(built));
+  const linked = planNextPage({ ...base, pageNumber: 1, pageTotal: 25, links: [`${THREAD}?page=2`] }, THREAD);
+  check("a real link is preferred to a built one", linked.url === `${THREAD}?page=2` && linked.via === "link");
+  check("no links and no page-total: stop, no_next_link", JSON.stringify(planNextPage(base, THREAD)) === `{"url":null,"stop":"no_next_link"}`);
+  check("last page: stop, page_total", JSON.stringify(planNextPage({ ...base, url: `${THREAD}?page=25`, pageTotal: 25 }, THREAD)) === `{"url":null,"stop":"page_total"}`);
+  const shared = `${THREAD}?reply=987654`;
+  const fromShared = planNextPage({ ...base, url: shared, finalUrl: shared, pageNumber: 1, pageTotal: 3 }, shared);
+  check("a built page drops the rest of the shared query", fromShared.url === `${THREAD}?page=2`, String(fromShared.url));
+  const fromLater = planNextPage({ ...base, url: `${THREAD}?page=2`, finalUrl: `${THREAD}?page=2`, pageNumber: 2, pageTotal: 3 }, THREAD);
+  check("a built page counts on from the page asked for", fromLater.url === `${THREAD}?page=3`, String(fromLater.url));
+
+  // A short address that redirects to the full one: links carry the full path.
+  const SHORT = "https://forum.example/talk/1234";
+  check(
+    "follows a link on the path the site redirected to",
+    nextPageUrl({ ...base, url: SHORT, finalUrl: THREAD, links: [`${THREAD}?page=2`] }, SHORT) === `${THREAD}?page=2`
+  );
+  check(
+    "a redirect to another host does not widen the path",
+    nextPageUrl({ ...base, url: SHORT, finalUrl: "https://elsewhere.example/talk/gardening/1234-what-is-eating-my-beans", links: [`${THREAD}?page=2`] }, SHORT) === null
+  );
+  check("a relative next link is resolved against the page", nextPageUrl({ ...base, links: ["?page=2"] }, THREAD) === `${THREAD}?page=2`);
+
+  const bare = (n: number, total: number, text: string, links: unknown = undefined) => ({
+    url: n === 1 ? THREAD : `${THREAD}?page=${n}`,
+    final_url: n === 1 ? THREAD : `${THREAD}?page=${n}`,
+    title: "What is eating my beans?",
+    text: `<main>${text}</main>`,
+    ...(links === undefined ? {} : { links }),
+    page_metadata: { other: { "page-number": String(n), "page-total": String(total) } },
+    format: "html",
+  });
+  const pageOf = (requested: string) => Number(new URL(requested).searchParams.get("page") ?? "1");
+
+  // The service sends no link list at all.
+  logged.length = 0;
+  let tf = mockTinyfish((requested) => ok(bare(pageOf(requested), 3, post("BeanCounter42", "03/06/2031 10:00", `Post on page ${pageOf(requested)} about netting.`))));
+  let article = await fetchViaFallback(THREAD, { apiKey: KEY, fetchImpl: tf.fetchImpl, sleep });
+  check("no link list: all three pages are still fetched", tf.calls.length === 3 && /page 3 about netting/.test(article.contentHtml), `${tf.calls.length} calls`);
+  check("no link list: no truncation note", !/cut short/.test(article.contentHtml));
+  check(
+    "the log line gives the stop reason, link count and page numbers",
+    logged.some((l) => /pages=3 outcome=ok stop=page_total links=0 first=1 total=3$/.test(l)),
+    logged.join(" | ")
+  );
+
+  // The service sends links as objects.
+  tf = mockTinyfish((requested) => {
+    const n = pageOf(requested);
+    return ok({ ...bare(n, 2, post("MarrowMaven", "03/06/2031 11:00", `Object-link page ${n}.`), [{ url: "https://forum.example/" }, { href: n < 3 ? `${THREAD}?page=${n + 1}` : `${THREAD}?page=1` }, 7, null]), page_metadata: undefined });
+  });
+  logged.length = 0;
+  article = await fetchViaFallback(THREAD, { apiKey: KEY, fetchImpl: tf.fetchImpl, sleep });
+  check("links given as objects are read", tf.calls.length === 3 && logged.some((l) => /links=2 /.test(l)), `${tf.calls.length} calls; ${logged.join(" | ")}`);
+
+  // A site that ignores ?page= and serves page one again.
+  logged.length = 0;
+  tf = mockTinyfish(() => ok(bare(1, 5, post("CompostCorner", "03/06/2031 12:00", "The only page there is."))));
+  article = await fetchViaFallback(THREAD, { apiKey: KEY, fetchImpl: tf.fetchImpl, sleep });
+  check("a built page that comes back as page one is not kept", tf.calls.length === 2 && (article.contentHtml.match(/The only page there is/g) ?? []).length === 1, `${tf.calls.length} calls`);
+  check("and the item says it is cut short", /cut short: the first 1 of 5 page is saved/.test(article.contentHtml), article.contentHtml.slice(0, 200));
+  check("and the log says page_mismatch", logged.some((l) => /pages=1 outcome=truncated:error stop=page_mismatch/.test(l)), logged.join(" | "));
+
+  // A later page fails: the code is in the log.
+  logged.length = 0;
+  tf = mockTinyfish((requested) =>
+    pageOf(requested) === 1
+      ? ok(bare(1, 4, post("BeanCounter42", "03/06/2031 13:00", "First page."), [`${THREAD}?page=2`]))
+      : Response.json({ results: [], errors: [{ url: requested, error: "bot_blocked" }] })
+  );
+  await fetchViaFallback(THREAD, { apiKey: KEY, fetchImpl: tf.fetchImpl, sleep });
+  check("a failed later page is named in the log", logged.some((l) => /pages=1 outcome=truncated:error stop=page_failed:bot_blocked links=1 first=1 total=4$/.test(l)), logged.join(" | "));
+
+  // No metadata, no links: one page, and the log says why.
+  logged.length = 0;
+  tf = mockTinyfish(() => ok({ url: THREAD, final_url: THREAD, title: "t", text: `<main>${post("MarrowMaven", "03/06/2031 14:00", "Alone.")}</main>`, format: "html" }));
+  await fetchViaFallback(THREAD, { apiKey: KEY, fetchImpl: tf.fetchImpl, sleep });
+  check("nothing to go on: one page, stop=no_next_link", tf.calls.length === 1 && logged.some((l) => /pages=1 outcome=ok stop=no_next_link links=0 first=\? total=\?$/.test(l)), logged.join(" | "));
 }
 
 // ── cleanPages on its own ─────────────────────────────────────────

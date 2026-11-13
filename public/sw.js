@@ -20,7 +20,7 @@
 // Bump on any change to styling or markup: cached article HTML references
 // hashed CSS/font URLs, and stale HTML pointing at deleted chunks renders
 // unstyled. Activation deletes every shell/asset cache not matching this.
-const VERSION = "v32";
+const VERSION = "v33";
 
 /*
  * Downloaded articles are versioned SEPARATELY, and this is the whole point.

@@ -11,6 +11,7 @@ import { ArticleEndings } from "@/components/ArticleEndings";
 import { ThreadSummary } from "@/components/ThreadSummary";
 import { Working } from "@/components/Working";
 import { DigestPending } from "@/components/DigestPending";
+import { ExtractionWatch } from "@/components/ExtractionWatch";
 import { listSummaries } from "@/lib/summarize/store";
 import { threadAdapterFor } from "@/lib/threads";
 
@@ -164,6 +165,13 @@ export default async function ReadPage(props: PageProps<"/read/[id]">) {
         )}
 
         {pending && item.digest && <DigestPending itemId={item.id} />}
+
+        {/* A page rendered (or cached) while extraction was pending or failed
+            checks whether that is still true, and reloads when it is not. A
+            digest has its own watcher above. */}
+        {(pending || failed) && !item.digest && (
+          <ExtractionWatch itemId={item.id} status={pending ? "pending" : "failed"} />
+        )}
 
         {pending && !item.digest && (
           <p

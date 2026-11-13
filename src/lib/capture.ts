@@ -46,6 +46,14 @@ export async function captureUrl(userId: string, rawUrl: string) {
         position: await topPosition(userId),
         status: "unread",
         savedAt: new Date(),
+        // A failed row is about to be tried again (below), and that can now
+        // take a minute when the fetch fallback walks a long thread. Until it
+        // has had its turn the row is in progress, not failed: left as it
+        // was, the list and the reader went on showing the old error for a
+        // save that was under way. Same as the retry button.
+        ...(existing.extractStatus === "failed"
+          ? { extractStatus: "pending", extractError: null }
+          : {}),
       },
     });
     // Retry extraction if it failed last time.

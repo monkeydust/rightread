@@ -94,62 +94,108 @@ function pageParam(u: URL): number | null {
   return null;
 }
 
+/** The origins and paths a next-page URL may have: where we asked, and where the site sent us. */
+function threadPlaces(page: FallbackPage, base: URL): { origins: Set<string>; paths: string[]; landed: URL | null } {
+  // Same origin: scheme, host and port, not just a matching hostname. The one
+  // allowance is where the site itself sent the request — a redirect from
+  // example.com to https://www.example.com is the same site, and its links
+  // will all carry the second spelling. That is accepted only for an https
+  // URL on the default port whose host differs by nothing but "www.". The
+  // path it landed on is accepted on the same terms: a short thread address
+  // that redirects to the full one links its pages under the full one.
+  const origins = new Set([base.origin]);
+  const paths = [base.pathname];
+  let landed: URL | null = null;
+  try {
+    const final = new URL(page.finalUrl);
+    if (
+      final.protocol === "https:" &&
+      final.port === "" &&
+      sameHost(final.hostname, base.hostname)
+    ) {
+      landed = final;
+      origins.add(final.origin);
+      paths.push(final.pathname);
+    }
+  } catch {
+    // an unparseable final URL adds nothing
+  }
+  return { origins, paths, landed };
+}
+
 /**
- * The next page of the same thread, or null at the end.
+ * The next page of the same thread as the page's own links name it, or null.
  *
  * Deliberately strict: the link must be on the origin and path we started
- * from and differ only by naming page n+1. The list of links is whatever the page
- * (or the service) says it is, so "next" is never taken on trust — a link to
- * another thread, another site or an internal address cannot be followed
- * because it cannot satisfy this.
+ * from (or were redirected to) and differ only by naming page n+1. The list
+ * of links is whatever the page (or the service) says it is, so "next" is
+ * never taken on trust — a link to another thread, another site or an
+ * internal address cannot be followed because it cannot satisfy this.
  */
 export function nextPageUrl(page: FallbackPage, threadUrl: string): string | null {
+  const next = planNextPage(page, threadUrl);
+  return next.url && next.via === "link" ? next.url : null;
+}
+
+export type NextPage =
+  | { url: string; via: "link" | "built"; number: number }
+  | { url: null; stop: "page_total" | "no_next_link" };
+
+/**
+ * Where to go after `page`, and why not when there is nowhere.
+ *
+ * Two sources, in order. A link on the page that names page n+1 (above). And,
+ * when the page's own metadata says there are more pages (`page-total`) but no
+ * such link was found, the address built by setting `page=n+1` on the thread
+ * URL. The second exists because the first production save stopped at page 1
+ * of 25 with no next link found, and whether a link list arrives at all is the
+ * service's business, not ours. A built address is a guess at the site's
+ * scheme, so the caller must check that the page it gets back says it is page
+ * n+1 before keeping it.
+ */
+export function planNextPage(page: FallbackPage, threadUrl: string): NextPage {
   let base: URL;
   let asked: URL;
   try {
     base = new URL(threadUrl);
     asked = new URL(page.url);
   } catch {
-    return null;
+    return { url: null, stop: "no_next_link" };
   }
 
   const current = pageParam(asked) ?? page.pageNumber ?? 1;
-  if (page.pageTotal && current >= page.pageTotal) return null;
+  if (page.pageTotal && current >= page.pageTotal) return { url: null, stop: "page_total" };
 
-  // Same origin: scheme, host and port, not just a matching hostname. The one
-  // allowance is where the site itself sent the first request — a redirect
-  // from example.com to https://www.example.com is the same site, and its
-  // links will all carry the second spelling. That is accepted only for an
-  // https URL on the default port whose host differs by nothing but "www.".
-  const origins = new Set([base.origin]);
-  try {
-    const landed = new URL(page.finalUrl);
-    if (
-      landed.protocol === "https:" &&
-      landed.port === "" &&
-      sameHost(landed.hostname, base.hostname)
-    ) {
-      origins.add(landed.origin);
-    }
-  } catch {
-    // an unparseable final URL adds nothing
-  }
+  const { origins, paths, landed } = threadPlaces(page, base);
 
   for (const link of page.links) {
     let candidate: URL;
     try {
-      candidate = new URL(link);
+      // Documented as absolute; resolving against the page costs nothing and
+      // keeps a relative "?page=2" from being thrown away.
+      candidate = new URL(link, landed ?? asked);
     } catch {
       continue;
     }
     if (candidate.protocol !== "https:" && candidate.protocol !== "http:") continue;
     if (!origins.has(candidate.origin)) continue;
-    if (!samePath(candidate.pathname, base.pathname)) continue;
+    if (!paths.some((p) => samePath(candidate.pathname, p))) continue;
     if (pageParam(candidate) !== current + 1) continue;
     candidate.hash = "";
-    return candidate.toString();
+    return { url: candidate.toString(), via: "link", number: current + 1 };
   }
-  return null;
+
+  if (page.pageTotal && current < page.pageTotal) {
+    // Only origin and path are carried over: whatever else the shared URL had
+    // in its query (a "jump to this reply" marker, say) belongs to page one.
+    const from = pageParam(asked) === null ? (landed ?? asked) : asked;
+    const built = new URL(from.origin + from.pathname);
+    const name = PAGE_PARAMS.find((p) => asked.searchParams.has(p)) ?? PAGE_PARAMS[0];
+    built.searchParams.set(name, String(current + 1));
+    return { url: built.toString(), via: "built", number: current + 1 };
+  }
+
+  return { url: null, stop: "no_next_link" };
 }
 
 /**
@@ -353,6 +399,16 @@ export async function fetchViaFallback(url: string, deps: FallbackDeps = {}): Pr
 
   const pages: FallbackPage[] = [];
   let truncated: Truncation = null;
+  // Why the walk ended. Logged, because "pages=1 outcome=ok" on a 25-page
+  // thread said nothing about what went wrong.
+  let stop = "first_page_failed";
+  const facts = () => {
+    const first = pages[0];
+    return (
+      `stop=${stop} links=${first ? first.links.length : 0} ` +
+      `first=${first?.pageNumber ?? "?"} total=${first?.pageTotal ?? "?"}`
+    );
+  };
 
   try {
     let page = await fetchPage(url, apiKey, deps.fetchImpl);
@@ -361,29 +417,55 @@ export async function fetchViaFallback(url: string, deps: FallbackDeps = {}): Pr
     const seen = new Set([url]);
 
     for (;;) {
-      const next = nextPageUrl(page, url);
-      if (!next || seen.has(next)) break;
+      const next = planNextPage(page, url);
+      if (next.url === null) {
+        stop = next.stop;
+        break;
+      }
+      if (seen.has(next.url)) {
+        stop = "repeat";
+        break;
+      }
       if (pages.length >= MAX_PAGES) {
         truncated = "pages";
+        stop = "cap";
         break;
       }
       if (totalChars >= MAX_TOTAL_CHARS) {
         truncated = "size";
+        stop = "size";
         break;
       }
       if (now() - started >= DEADLINE_MS) {
         truncated = "time";
+        stop = "budget";
         break;
       }
 
       await sleep(PAUSE_MS);
+      let fetched: FallbackPage;
       try {
-        page = await fetchPage(next, apiKey, deps.fetchImpl);
-      } catch {
+        fetched = await fetchPage(next.url, apiKey, deps.fetchImpl);
+      } catch (err) {
         truncated = "error";
+        stop = `page_failed:${err instanceof FallbackError ? err.code : "unknown_error"}`;
         break;
       }
-      seen.add(next);
+      // The page must be the one asked for. An address we built is a guess
+      // and has to be confirmed by the page saying so; a linked one is only
+      // refused when the page says it is a different page. Without this, a
+      // site that ignores the parameter would give page one again, and again.
+      const wrongPage =
+        next.via === "built"
+          ? fetched.pageNumber !== next.number
+          : fetched.pageNumber !== null && fetched.pageNumber !== next.number;
+      if (wrongPage) {
+        truncated = "error";
+        stop = "page_mismatch";
+        break;
+      }
+      page = fetched;
+      seen.add(next.url);
       pages.push(page);
       totalChars += page.html.length;
     }
@@ -391,13 +473,14 @@ export async function fetchViaFallback(url: string, deps: FallbackDeps = {}): Pr
     const article = buildArticle(url, pages, truncated);
     console.log(
       `[rightread] fetch fallback (tinyfish) host=${host} pages=${pages.length} ` +
-        `outcome=${truncated ? `truncated:${truncated}` : "ok"}`
+        `outcome=${truncated ? `truncated:${truncated}` : "ok"} ${facts()}`
     );
     return article;
   } catch (err) {
     const code = err instanceof FallbackError ? err.code : "unusable_content";
     console.warn(
-      `[rightread] fetch fallback (tinyfish) host=${host} pages=${pages.length} outcome=error:${code}`
+      `[rightread] fetch fallback (tinyfish) host=${host} pages=${pages.length} ` +
+        `outcome=error:${code} ${facts()}`
     );
     throw err instanceof FallbackError ? err : new FallbackError(code);
   }

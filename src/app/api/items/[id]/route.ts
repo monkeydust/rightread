@@ -7,6 +7,29 @@ import { runExtraction } from "@/lib/capture";
 import { publish } from "@/lib/events";
 
 /**
+ * GET /api/items/[id] — the item's extraction state, and nothing else.
+ *
+ * For the reader (`ExtractionWatch`): a page that was rendered, or cached,
+ * while extraction was pending or failed asks whether that is still so.
+ */
+export async function GET(_request: NextRequest, ctx: RouteContext<"/api/items/[id]">) {
+  const session = await auth();
+  const userId = session?.user?.id;
+  if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id } = await ctx.params;
+  const item = await prisma.item.findFirst({
+    where: { id, userId },
+    select: { extractStatus: true },
+  });
+  if (!item) return Response.json({ error: "Not found" }, { status: 404 });
+  return Response.json(
+    { extractStatus: item.extractStatus },
+    { headers: { "Cache-Control": "no-store" } }
+  );
+}
+
+/**
  * PATCH /api/items/[id] — the one mutation endpoint the list UI uses.
  * Body is one of:
  *   { move: "up" | "down" | "top" | "bottom" }

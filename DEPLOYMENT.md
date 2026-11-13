@@ -126,7 +126,13 @@ pages, one request every 1.5 seconds. Things to know before setting it:
 - Blank or missing means off, and the app behaves exactly as it did before the
   feature existed. Like every runtime variable it must be in `.env.prod` *and*
   listed under `environment:` in `docker-compose.yml` (it is).
-- Each use logs one line, `fetch fallback (tinyfish) host=… pages=… outcome=…`.
+- Each use logs one line,
+  `fetch fallback (tinyfish) host=… pages=… outcome=… stop=… links=… first=… total=…`.
+  `stop` is why the walk ended: `page_total` (reached the last page), `no_next_link`
+  (nothing named a next page), `page_failed:<code>`, `page_mismatch` (the next page came
+  back as a different page), `cap`, `size`, `budget`, `repeat`. `links` is the number of
+  links received with the first page; `first` and `total` are the page numbers the first
+  page reported (`?` when it reported none).
   The key is never logged.
 
 `AUTH_URL` matters. With it set, `src/app/api/auth/[...nextauth]/route.ts`

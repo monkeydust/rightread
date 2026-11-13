@@ -106,6 +106,23 @@ function metaTag(meta: unknown, group: string, name: string): string | null {
   );
 }
 
+/**
+ * The documentation says `links` is an array of absolute URL strings. The
+ * first production save found no next page on a 25-page thread, and the HTTP
+ * API's real answer has never been seen from here, so accept the other shapes
+ * a link list commonly takes ({ url }, { href }) instead of dropping them.
+ */
+function linkList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const entry of value) {
+    const link =
+      typeof entry === "string" ? entry : (str(dig(entry, "url")) ?? str(dig(entry, "href")));
+    if (link) out.push(link);
+  }
+  return out;
+}
+
 export async function fetchPage(
   url: string,
   apiKey: string,
@@ -180,9 +197,7 @@ export async function fetchPage(
     siteName: metaTag(meta, "og", "site_name"),
     leadImage: metaTag(meta, "og", "image"),
     html,
-    links: Array.isArray(links)
-      ? links.filter((l): l is string => typeof l === "string")
-      : [],
+    links: linkList(links),
     pageNumber: int(dig(meta, "other", "page-number")),
     pageTotal: int(dig(meta, "other", "page-total")),
   };
