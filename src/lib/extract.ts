@@ -109,6 +109,64 @@ export function isPrivateHost(hostname: string): boolean {
   return false;
 }
 
+/**
+ * The site answered, and the answer was "not you".
+ *
+ * A bot wall is a different failure from a missing page or a dead server: the
+ * page exists and a person can read it, but this machine never will, so a
+ * retry is pointless and the useful next step is a different way in (the paste
+ * path, or the fetch fallback in `lib/fetch-fallback/`). It gets its own error
+ * class so callers can tell it apart without parsing a message, and a message
+ * starting "Blocked:" so the stored `extractError` says what happened.
+ */
+export class BlockedError extends Error {
+  readonly status: number;
+  readonly host: string;
+
+  constructor(host: string, status: number) {
+    super(`Blocked: ${host} refuses requests from this server (HTTP ${status})`);
+    this.name = "BlockedError";
+    this.status = status;
+    this.host = host;
+  }
+}
+
+/** The statuses a bot wall answers with. Anything else is an ordinary failure. */
+const BLOCK_STATUSES = new Set([403, 429, 503]);
+
+/**
+ * Phrases from Cloudflare's block and challenge pages. Matched against the
+ * start of the body, lowercased. Deliberately narrow: a plain 403 from an
+ * origin that simply forbids the path must stay a plain "Fetch failed".
+ */
+const BLOCK_BODY_MARKERS = [
+  "sorry, you have been blocked",
+  "attention required! | cloudflare",
+  "just a moment...",
+  "cf-error-details",
+  "/cdn-cgi/challenge-platform/",
+  "performing security verification",
+];
+
+/**
+ * Whether a non-OK response is a bot wall rather than an ordinary error.
+ *
+ * `cf-mitigated` is the header Cloudflare sets on a challenge and is decisive
+ * on its own. Otherwise the body has to say so: `server: cloudflare` alone
+ * proves nothing, since Cloudflare fronts a large share of the web and relays
+ * its origins' honest 403s and 503s under the same header.
+ */
+export function looksBlocked(
+  status: number,
+  headers: { get(name: string): string | null },
+  bodyStart: string
+): boolean {
+  if (!BLOCK_STATUSES.has(status)) return false;
+  if (headers.get("cf-mitigated")) return true;
+  const body = bodyStart.slice(0, 20_000).toLowerCase();
+  return BLOCK_BODY_MARKERS.some((marker) => body.includes(marker));
+}
+
 export type SafeFetchOptions = {
   /**
    * Content types this caller can actually use; anything else throws rather
@@ -150,6 +208,55 @@ export function slashVariant(raw: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** How much of a 403/429/503 body is read to decide whether it is a bot wall. */
+const BLOCK_SNIFF_BYTES = 64 * 1024;
+
+/**
+ * Reads a response body, stopping once more than `limit` bytes have arrived.
+ *
+ * `exceeded` is true when the body was longer than the limit; `bytes` then
+ * holds what was read up to the point of stopping (at most one chunk past the
+ * limit), and the rest of the stream is cancelled, never buffered. A body
+ * within the limit comes back whole, exactly as `arrayBuffer()` would give it.
+ */
+async function readCapped(
+  res: Response,
+  limit: number
+): Promise<{ bytes: Uint8Array; exceeded: boolean }> {
+  // No stream to meter (an empty body). Nothing to cap.
+  if (!res.body) return { bytes: new Uint8Array(await res.arrayBuffer()), exceeded: false };
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let exceeded = false;
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.byteLength;
+      if (total > limit) {
+        exceeded = true;
+        break;
+      }
+    }
+  } finally {
+    // Tells the server we are done and releases the connection. Harmless
+    // after a complete read; essential after an early stop.
+    await reader.cancel().catch(() => {});
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { bytes, exceeded };
 }
 
 export async function safeFetch(
@@ -207,7 +314,21 @@ export async function safeFetch(
       }
     }
 
-    if (!res.ok) throw new Error(`Fetch failed: HTTP ${res.status}`);
+    if (!res.ok) {
+      // Only the three statuses a bot wall uses are worth reading a body for.
+      if (BLOCK_STATUSES.has(res.status)) {
+        // Capped: a server can answer 403 and then stream for ever, and the
+        // timeout alone only stops that after everything sent has been
+        // buffered. The markers are in the first few KB of a wall page.
+        const bodyStart = await readCapped(res, BLOCK_SNIFF_BYTES)
+          .then((r) => new TextDecoder("utf-8").decode(r.bytes))
+          .catch(() => "");
+        if (looksBlocked(res.status, res.headers, bodyStart)) {
+          throw new BlockedError(parsed.hostname, res.status);
+        }
+      }
+      throw new Error(`Fetch failed: HTTP ${res.status}`);
+    }
 
     const type = res.headers.get("content-type") ?? "";
     if (!opts.contentTypes.test(type)) {
@@ -221,10 +342,13 @@ export async function safeFetch(
     const declared = Number(res.headers.get("content-length") ?? 0);
     if (declared > limit) throw tooBig(declared);
 
-    const buf = await res.arrayBuffer();
-    if (buf.byteLength > limit) throw tooBig(buf.byteLength);
+    // content-length is optional and unverified, so the limit is enforced on
+    // the bytes as they arrive: the read stops one byte past it rather than
+    // buffering whatever the server chooses to send and measuring afterwards.
+    const read = await readCapped(res, limit);
+    if (read.exceeded) throw tooBig(read.bytes.byteLength);
 
-    const body = new TextDecoder("utf-8").decode(buf);
+    const body = new TextDecoder("utf-8").decode(read.bytes);
 
     // A 200 that is really a redirect. Re-enters the loop so the destination
     // gets the same private-address check as any other hop.
@@ -381,6 +505,91 @@ export function extractFromHtml(html: string, sourceUrl: string): Extracted {
 
   dom.window.close();
   return result;
+}
+
+/**
+ * Elements whose text is interface, not content. The sanitizer would remove
+ * the tags but keep what is inside them (KEEP_CONTENT), which turns a button
+ * into a stray word in the middle of a post — so they go, contents and all,
+ * before it runs.
+ */
+const NON_CONTENT_SELECTOR =
+  "script, style, noscript, template, nav, form, button, select, textarea, " +
+  "input, svg, dialog, iframe, [hidden], [aria-hidden='true']";
+
+/**
+ * Turns already-obtained HTML into reader content WITHOUT asking Readability
+ * what the article is: everything in the body is kept, in order.
+ *
+ * Readability looks for one block of prose and treats the rest as clutter,
+ * which is backwards for a discussion thread (see `lib/threads/types.ts` for
+ * what it did to Hacker News). This is for HTML that something upstream has
+ * already reduced to its content — today, the pages the fetch fallback
+ * returns — where a second opinion about what to drop can only lose posts.
+ *
+ * The guarantees are the same as `extractFromHtml`: the result has been
+ * through `sanitizeArticleHtml` and the tidy pass, and an input with no text
+ * throws rather than storing an empty article.
+ */
+export function extractWholeFromHtml(html: string, sourceUrl: string): Extracted {
+  const cleaned = html.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
+
+  const virtualConsole = new VirtualConsole();
+  virtualConsole.on("jsdomError", () => {});
+
+  let dom: JSDOM;
+  try {
+    dom = new JSDOM(cleaned, { url: sourceUrl, virtualConsole });
+  } catch (err) {
+    throw new Error(
+      `This page's markup couldn't be parsed (${
+        err instanceof Error ? err.message.slice(0, 80) : "unknown"
+      })`
+    );
+  }
+
+  try {
+    const doc = dom.window.document;
+    const siteName =
+      doc.querySelector('meta[property="og:site_name"]')?.getAttribute("content") ??
+      null;
+    const leadImage = firstImage(doc, sourceUrl);
+    const title =
+      doc.querySelector("title")?.textContent?.trim() ||
+      doc.querySelector("h1")?.textContent?.trim() ||
+      new URL(sourceUrl).hostname;
+
+    for (const el of [...doc.body.querySelectorAll(NON_CONTENT_SELECTOR)]) el.remove();
+
+    const contentHtml = tidyArticleHtml(
+      dom.window,
+      sanitizeArticleHtml(dom.window, doc.body.innerHTML, sourceUrl)
+    );
+
+    // textContent runs blocks together ("…end.Next…"), so put a space at each
+    // block boundary before reading it. The staging document is inert.
+    const staging = doc.implementation.createHTMLDocument("text");
+    staging.body.innerHTML = contentHtml.replace(
+      /<\/(?:p|div|li|h[1-6]|blockquote|tr|td|th|pre|figcaption)>|<br\s*\/?>|<hr\s*\/?>/gi,
+      "$& "
+    );
+    const textContent = (staging.body.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (!textContent) throw new Error("No readable content found on this page");
+
+    return {
+      title: title.slice(0, 300),
+      siteName: siteName?.slice(0, 120) ?? null,
+      byline: null,
+      excerpt: textContent.slice(0, 280),
+      leadImage,
+      contentHtml,
+      textContent,
+      wordCount: textContent.split(" ").length,
+      resolvedUrl: sourceUrl,
+    };
+  } finally {
+    dom.window.close();
+  }
 }
 
 /** ~200 wpm, the usual reading-time figure. Always at least 1. */

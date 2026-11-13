@@ -52,6 +52,10 @@ services:
       # lib/phrases/match.ts for the numbers it came from.
       - RIGHTREAD_PHRASE_FLOOR=${RIGHTREAD_PHRASE_FLOOR:-0.32}
       - RIGHTREAD_REC_FLOOR=${RIGHTREAD_REC_FLOOR:-0.45}
+      # Fetch fallback for pages whose site refuses this server (a bot wall).
+      # Blank means off: no call is ever made and a blocked save fails as it
+      # always did. When set, the URL of each blocked page goes to TinyFish.
+      - TINYFISH_API_KEY=${TINYFISH_API_KEY:-}
     volumes:
       - sqlite_data:/app/data
 

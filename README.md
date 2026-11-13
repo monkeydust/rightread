@@ -116,6 +116,7 @@ Stack: Next.js 16 · React 19 · Prisma + SQLite · Auth.js (magic link via Rese
 | `OPENROUTER_SUMMARY_MODEL` | Model for thread summaries. Blank means `OPENROUTER_MODEL`. |
 | `OPENROUTER_EMBED_MODEL` | Defaults to `openai/text-embedding-3-small`. Changing it invalidates stored vectors. |
 | `OPENROUTER_SEMANTIC_FLOOR` | Semantic search cut-off, 0 to 1. Defaults to `0.22`. |
+| `TINYFISH_API_KEY` | Optional. When a site refuses the server with a bot wall, the page is fetched through [TinyFish](https://docs.tinyfish.ai/fetch-api) instead, which is sent that page's URL. Blank means off: blocked saves fail and wait for a paste. |
 | `GRAPH_EDGE_FLOOR` / `GRAPH_MAX_NODES` | Graph noise guard (`0.15`) and size cap (`2000`). |
 | `RIGHTREAD_PHRASE_FLOOR` / `RIGHTREAD_REC_FLOOR` | Discover cut-offs (`0.32` phrase, `0.45` article). |
 

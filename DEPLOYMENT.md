@@ -76,6 +76,7 @@ RIGHTREAD_ALLOWED_EMAILS="you@example.com,someone@else.com"
 OPENROUTER_API_KEY="<openrouter key>"
 OPENROUTER_MODEL="openai/gpt-5.6-luna"
 OPENROUTER_SUMMARY_MODEL="openai/gpt-5.6-sol"   # optional; blank = OPENROUTER_MODEL
+TINYFISH_API_KEY=""                             # optional; blank = no fetch fallback
 ```
 
 `EMAIL_FROM` must use a domain **verified at resend.com/domains**, and this
@@ -109,6 +110,24 @@ absent the app still works — pages classify as `other`, the Summarise button
 reports that the summariser is unavailable, and nothing else errors.
 `OPENROUTER_SUMMARY_MODEL` lets summaries use a stronger model than the cheap
 one classification needs; each summary row records the model that wrote it.
+
+`TINYFISH_API_KEY` turns on the fetch fallback (`src/lib/fetch-fallback/`).
+Some sites answer every request from a server with a bot wall, so a save of a
+page you were just reading arrives as a failed row. With a key set, a save that
+fails **that way and only that way** (HTTP 403/429/503 carrying Cloudflare's
+block or challenge markers) is fetched through TinyFish's Fetch API instead,
+and a paginated forum thread is followed page by page into one item, at most 40
+pages, one request every 1.5 seconds. Things to know before setting it:
+
+- The URL of each blocked page is sent to TinyFish. Nothing else is. Pages that
+  fetch normally, 404s and timeouts never go there.
+- It is free up to 1,000 pages a day at the time of writing; beyond that the
+  API answers 402 and the save simply fails as it would without the key.
+- Blank or missing means off, and the app behaves exactly as it did before the
+  feature existed. Like every runtime variable it must be in `.env.prod` *and*
+  listed under `environment:` in `docker-compose.yml` (it is).
+- Each use logs one line, `fetch fallback (tinyfish) host=… pages=… outcome=…`.
+  The key is never logged.
 
 `AUTH_URL` matters. With it set, `src/app/api/auth/[...nextauth]/route.ts`
 stops deriving the host from request headers. That derivation exists only to

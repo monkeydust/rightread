@@ -4,6 +4,7 @@ import { sanitizeArticleHtml } from "@/lib/sanitize";
 import { normalizeUrl, hostLabel } from "@/lib/url";
 import { extractArticle, extractFromHtml, type Extracted } from "@/lib/extract";
 import { youtubeVideoId, extractYouTube } from "@/lib/extract-video";
+import { shouldUseFallback, fetchViaFallback, FallbackError } from "@/lib/fetch-fallback";
 import { threadAdapterFor, fetchThread, renderThread } from "@/lib/threads";
 import { classifyPage, type PageEvidence } from "@/lib/classify";
 import { publish } from "@/lib/events";
@@ -93,8 +94,35 @@ export async function runExtraction(itemId: string, url: string): Promise<void> 
       : (await extractThreadOrNull(url)) ?? (await extractArticle(url));
     await persistArticle(itemId, article, owner?.userId, notify);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    let message = err instanceof Error ? err.message : String(err);
     console.error(`[rightread] extraction failed for ${url}: ${message}`);
+
+    // The site refused this server outright (a bot wall, not a missing page).
+    // If a fetch fallback is configured, ask it for the page instead. This
+    // comes before the keep-the-old-copy rule below on purpose: an item first
+    // saved through the fallback is blocked again on every refresh, and
+    // keeping the old copy there would make "Refresh" a no-op for exactly the
+    // threads worth refreshing. With no key configured this branch is never
+    // entered and everything below behaves as it always has.
+    if (shouldUseFallback(err)) {
+      try {
+        const article = await fetchViaFallback(url);
+        await persistArticle(itemId, article, owner?.userId, notify);
+        return;
+      } catch (fallbackErr) {
+        const why =
+          fallbackErr instanceof FallbackError
+            ? fallbackErr.code
+            : "could not store the result";
+        if (!(fallbackErr instanceof FallbackError)) {
+          console.error(
+            `[rightread] storing the fallback copy of ${url} failed:`,
+            fallbackErr instanceof Error ? fallbackErr.message : fallbackErr
+          );
+        }
+        message = `${message}. The fallback fetch also failed (${why})`;
+      }
+    }
 
     // Re-extracting an article that already reads fine (to pick up a better
     // tidy pass, say) must never make it worse. If the site is down or has
