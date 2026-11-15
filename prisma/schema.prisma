@@ -31,6 +31,8 @@ model User {
   shares          GroupShare[]
   dismissals      GroupShareDismissal[]
   summaries       ItemSummary[]
+  pushSubscriptions       PushSubscription[]
+  notificationPreferences NotificationPreference[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 }
@@ -59,6 +61,9 @@ model Session {
   userId       String
   expires      DateTime
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Devices that switched notifications on while signed in with this session.
+  /// Only here so that signing out (which deletes this row) removes them.
+  pushSubscriptions PushSubscription[]
 }
 
 model VerificationToken {
@@ -489,4 +494,59 @@ model GroupShareDismissal {
 
   @@unique([shareId, userId])
   @@index([userId])
+}
+
+// ─── Notifications ──────────────────────────────────────────
+
+/// One device that has agreed to receive Web Push notifications for a user.
+///
+/// `endpoint` is a capability URL issued by the browser's push service: anyone
+/// holding it can make that device show a notification, so it is treated as a
+/// secret (never logged whole, never sent to the client except to the device
+/// that owns it). It is unique across users on purpose: a phone that signs out
+/// and into another account re-registers the same endpoint, and the row moves
+/// to the new user rather than leaving the old one able to reach it.
+///
+/// `sessionId` ties the device to the sign-in it was enabled under, with
+/// Cascade, so that signing out removes the subscription on the server even
+/// if the page never gets to say so. Nullable: a row whose session cannot be
+/// identified is still valid and is removed by the Settings switch or by the
+/// push service answering 404/410.
+model PushSubscription {
+  id        String  @id @default(cuid())
+  userId    String
+  sessionId String?
+  endpoint  String  @unique
+  /// The device's public key and auth secret, base64url, as the browser gave
+  /// them. Used to encrypt each message for that device only.
+  p256dh    String
+  auth      String
+  /// Short human label derived from the user agent ("Chrome on Android"), so
+  /// a list of devices can be shown later. Never the full user agent.
+  label     String  @default("")
+
+  createdAt  DateTime  @default(now())
+  /// Last time the push service accepted a message for this device.
+  lastSentAt DateTime?
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session Session? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([sessionId])
+}
+
+/// A user's choice for one notification type. `type` is an id from the
+/// registry in src/lib/notify/types.ts, deliberately a plain string so a new
+/// type needs no schema change. No row means "the type's default".
+model NotificationPreference {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  enabled   Boolean
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
 }
