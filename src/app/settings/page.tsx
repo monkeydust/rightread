@@ -5,6 +5,9 @@ import { prisma } from "@/lib/db";
 import { TokenManager } from "@/components/TokenManager";
 import { SourceManager } from "@/components/SourceManager";
 import { KeyPhraseManager } from "@/components/KeyPhraseManager";
+import { NotificationSettings } from "@/components/NotificationSettings";
+import { vapidConfig } from "@/lib/notify";
+import { notificationSettings } from "@/lib/notify/subscriptions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Settings — rightread" };
@@ -47,6 +50,11 @@ export default async function SettingsPage() {
     },
   });
 
+  // The public key is public by design (the browser needs it to subscribe);
+  // the private one never leaves lib/notify.
+  const vapid = vapidConfig();
+  const notifications = await notificationSettings(session.user.id);
+
   return (
     <div className="mx-auto min-h-dvh max-w-2xl px-4 py-6">
       <Link
@@ -68,6 +76,15 @@ export default async function SettingsPage() {
 
       <div className="mt-10">
         <KeyPhraseManager phrases={phrases} />
+      </div>
+
+      <div className="mt-10">
+        <NotificationSettings
+          available={vapid !== null}
+          publicKey={vapid?.publicKey ?? null}
+          deviceHashes={notifications.deviceHashes}
+          types={notifications.types}
+        />
       </div>
 
       <div className="mt-10">

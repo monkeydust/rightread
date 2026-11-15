@@ -212,6 +212,16 @@ export async function memberIdsOf(groupId: string): Promise<string[]> {
   return rows.map((r) => r.userId);
 }
 
+/**
+ * A group's name, for a notification about it. Like `memberIdsOf`, this takes
+ * no caller: it is for server-side fan-out to people already known to be
+ * members, never for answering a request.
+ */
+export async function groupNameOf(groupId: string): Promise<string> {
+  const row = await prisma.group.findUnique({ where: { id: groupId }, select: { name: true } });
+  return row?.name ?? "";
+}
+
 export type MemberRow = { userId: string; email: string; joinedAt: Date; isMe: boolean };
 export type InviteRow = { id: string; email: string; createdAt: Date };
 

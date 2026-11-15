@@ -9,7 +9,8 @@ import { prisma } from "@/lib/db";
 import { normalizeUrl, hostLabel } from "@/lib/url";
 import { captureUrl, adoptSharedArticle } from "@/lib/capture";
 import { publishToAll, publish } from "@/lib/events";
-import { memberIdsOf, requireMember, resolveShare } from "./access";
+import { groupNameOf, memberIdsOf, requireMember, resolveShare } from "./access";
+import { notifyGroupShare } from "@/lib/notify";
 import { snapshotFromItem, isBetterSnapshot } from "./rules";
 
 /** Thrown when someone tries to share a link they have not saved. Routes render it as 400. */
@@ -106,11 +107,27 @@ export async function shareIntoGroup(
     });
   }
 
-  publishToAll(await memberIdsOf(groupId), {
+  const memberIds = await memberIdsOf(groupId);
+  publishToAll(memberIds, {
     type: "groups-changed",
     cause: "shared",
     groupId,
   });
+
+  // Phone notification to the other members. The share is already stored and
+  // this cannot undo it: the call returns at once, sends in the background and
+  // swallows every failure, including the name lookup.
+  try {
+    notifyGroupShare({
+      groupId,
+      groupName: await groupNameOf(groupId).catch(() => ""),
+      memberIds,
+      sharerId: userId,
+      share: { id: share.id, title: share.title, url: share.url },
+    });
+  } catch {
+    /* a notification is never a reason for a share to fail */
+  }
 
   return share;
 }

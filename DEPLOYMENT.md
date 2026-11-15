@@ -77,6 +77,8 @@ OPENROUTER_API_KEY="<openrouter key>"
 OPENROUTER_MODEL="openai/gpt-5.6-luna"
 OPENROUTER_SUMMARY_MODEL="openai/gpt-5.6-sol"   # optional; blank = OPENROUTER_MODEL
 TINYFISH_API_KEY=""                             # optional; blank = no fetch fallback
+VAPID_PUBLIC_KEY=""                             # optional; blank = no phone notifications
+VAPID_PRIVATE_KEY=""                            # secret; pair of the one above
 ```
 
 `EMAIL_FROM` must use a domain **verified at resend.com/domains**, and this
@@ -133,6 +135,31 @@ pages, one request every 1.5 seconds. Things to know before setting it:
   back as a different page), `cap`, `size`, `budget`, `repeat`. `links` is the number of
   links received with the first page; `first` and `total` are the page numbers the first
   page reported (`?` when it reported none).
+
+`VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` turn on phone notifications
+(`src/lib/notify/`, Web Push). When someone shares a link into a group, the
+group's other members get a system notification on each device where they
+switched notifications on in Settings.
+
+- Generate the pair once: `docker run --rm rightread_app:latest node scripts/vapid-keys.mjs`
+  prints the two lines for `.env.prod`. Nothing is written to disk. The private
+  key is a secret; the public key is sent to browsers by design.
+- **Do not regenerate the pair** unless the private key has leaked. A new pair
+  invalidates every device's subscription, and each device then has to be
+  switched off and on again in Settings.
+- Blank or missing means off: no request is made, and Settings says
+  notifications are not set up. `VAPID_SUBJECT` is the contact push services
+  see, an `https:` or `mailto:` URL (default `https://www.rightread.net`).
+- The server sends only to the browsers' own push services (Google, Mozilla,
+  Microsoft, Apple), over https, with a 10 second timeout. A message carries the
+  group name, who shared, the title and the site, encrypted for that device.
+- A device is removed when the push service says its subscription is gone
+  (404/410), when the user switches it off, and when they sign out.
+- Each batch logs one line, `[notify] type=group_share recipients=… sent=… failed=… pruned=…`.
+  No titles, addresses or endpoints are logged. `sent` means the push service
+  accepted the message, not that the phone showed it.
+- Check after deploy: `docker exec rightread_app_1 sh -c 'echo ${#VAPID_PUBLIC_KEY} ${#VAPID_PRIVATE_KEY}'`
+  must print `87 43`.
   The key is never logged.
 
 `AUTH_URL` matters. With it set, `src/app/api/auth/[...nextauth]/route.ts`

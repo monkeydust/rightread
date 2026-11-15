@@ -56,6 +56,15 @@ services:
       # Blank means off: no call is ever made and a blocked save fails as it
       # always did. When set, the URL of each blocked page goes to TinyFish.
       - TINYFISH_API_KEY=${TINYFISH_API_KEY:-}
+      # Phone notifications (Web Push). Blank means off: nothing is sent and
+      # Settings says notifications are not set up. Generate a pair with
+      # `node scripts/vapid-keys.mjs` and put both in .env.prod. The private
+      # key is a secret. Changing the pair invalidates every device's
+      # subscription, so each device has to be switched on again.
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
+      # Contact shown to push services: an https: or mailto: URL.
+      - VAPID_SUBJECT=${VAPID_SUBJECT:-https://www.rightread.net}
     volumes:
       - sqlite_data:/app/data
 

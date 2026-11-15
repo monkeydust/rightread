@@ -20,7 +20,7 @@
 // Bump on any change to styling or markup: cached article HTML references
 // hashed CSS/font URLs, and stale HTML pointing at deleted chunks renders
 // unstyled. Activation deletes every shell/asset cache not matching this.
-const VERSION = "v33";
+const VERSION = "v34";
 
 /*
  * Downloaded articles are versioned SEPARATELY, and this is the whole point.
@@ -621,4 +621,82 @@ self.addEventListener("message", (event) => {
       });
     event.waitUntil(work);
   }
+});
+
+/*
+ * ── Notifications ────────────────────────────────────────────────
+ *
+ * Web Push. The server (src/lib/notify) sends a small encrypted JSON message:
+ *   { v: 1, type, title, body, path, tag }
+ * Nothing here touches a cache, and the fetch rules above are unchanged.
+ *
+ * Chrome requires every push to end in a visible notification, and withdraws
+ * the subscription from an origin that keeps failing to show one. So a push
+ * whose payload is missing, unreadable or of a version this worker does not
+ * know still shows a plain notification that opens the queue.
+ */
+const FALLBACK_NOTICE = { title: "rightread", body: "Something new on rightread", path: "/", tag: "rightread" };
+
+/** Only ever a path inside this app: a notification must not open another site. */
+function noticePath(value) {
+  return typeof value === "string" && /^\/(?!\/)[\w\-./?=&%]*$/.test(value) ? value : "/";
+}
+
+function readNotice(event) {
+  try {
+    const data = event.data ? event.data.json() : null;
+    if (!data || data.v !== 1 || typeof data.title !== "string" || !data.title) {
+      return FALLBACK_NOTICE;
+    }
+    return {
+      title: data.title.slice(0, 80),
+      body: typeof data.body === "string" ? data.body.slice(0, 300) : "",
+      path: noticePath(data.path),
+      tag: typeof data.tag === "string" && data.tag ? data.tag.slice(0, 64) : "rightread",
+    };
+  } catch {
+    return FALLBACK_NOTICE;
+  }
+}
+
+self.addEventListener("push", (event) => {
+  const notice = readNotice(event);
+  event.waitUntil(
+    self.registration.showNotification(notice.title, {
+      body: notice.body,
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      // Same tag replaces the earlier notification (a link shared twice);
+      // renotify makes the replacement audible like any other.
+      tag: notice.tag,
+      renotify: true,
+      data: { path: notice.path },
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const path = noticePath(event.notification.data && event.notification.data.path);
+  const target = new URL(path, self.location.origin).href;
+
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      // Prefer a window that is already there: the installed app, if open.
+      const existing = windows.find((c) => new URL(c.url).origin === self.location.origin);
+      if (existing) {
+        await existing.focus().catch(() => {});
+        if (existing.url !== target && "navigate" in existing) {
+          // navigate() rejects for a window this worker does not control yet.
+          const moved = await existing.navigate(target).catch(() => null);
+          if (moved) return;
+        } else {
+          return;
+        }
+      }
+      // An in-scope URL opens in the installed PWA when there is one.
+      await self.clients.openWindow(target);
+    })()
+  );
 });
