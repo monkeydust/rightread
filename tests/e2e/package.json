@@ -1,0 +1,9 @@
+{
+  "name": "rightread-e2e",
+  "private": true,
+  "description": "Browser tests for rightread. Run with tests/e2e/run.sh, not from here; see README.md.",
+  "type": "module",
+  "devDependencies": {
+    "@playwright/test": "1.65.1"
+  }
+}

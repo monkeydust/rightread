@@ -238,6 +238,7 @@ failed extraction never loses the save.
 npm run dev            # dev server
 npm run build          # production build
 npm test               # the full suite
+tests/e2e/run.sh       # the built app in a real browser (Docker; see tests/e2e/README.md)
 npm run db:backup      # timestamped SQLite backup
 npm run db:merge       # additive merge between two databases
 npm run search:backfill  # index existing items

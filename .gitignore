@@ -41,3 +41,7 @@ scratch/
 
 # Real server details — never commit these
 DEPLOYMENT.local.md
+
+# End-to-end tests (tests/e2e/run.sh)
+/tests/e2e/node_modules/
+/tests/e2e/test-results/

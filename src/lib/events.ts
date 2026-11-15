@@ -6,8 +6,8 @@
  * completions push to any open tab instead of the client polling for them.
  *
  * Deliberately in-process, not Redis or a message broker: rightread runs as a
- * single Node process in a single container, so a module-level registry is the
- * whole mechanism. **If it is ever run as more than one instance this breaks
+ * single Node process in a single container, so one registry in that process
+ * is the whole mechanism. **If it is ever run as more than one instance this breaks
  * silently** — a tab connected to instance A will never see work finished on
  * instance B. At that point this needs a shared broker, and the SSE route
  * becomes a subscriber to it rather than to this map.
@@ -43,19 +43,22 @@ export type AppEvent = ItemsChanged | GroupsChanged;
 type Listener = (event: AppEvent) => void;
 
 /**
- * Survives hot-reload in dev. Without this, every edit leaks the previous
- * module's listeners and connected tabs stop receiving anything.
+ * One registry for the whole process, held on `globalThis` rather than in a
+ * module variable.
+ *
+ * A module variable is not one-per-process. The production build gives pages
+ * (and server actions) and API routes their own copies of this module, so a
+ * `publish` made while rendering `/share` looked in a different map from the
+ * one `/api/events` had subscribed to: a save through the Android share
+ * target reached no open tab, while the same save through `/api/items` did.
+ * In development the same split appears on every hot reload. `globalThis` is
+ * the one object every copy shares.
  */
 const globalForEvents = globalThis as unknown as {
   rightreadListeners?: Map<string, Set<Listener>>;
 };
 
-const listeners: Map<string, Set<Listener>> =
-  globalForEvents.rightreadListeners ?? new Map();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForEvents.rightreadListeners = listeners;
-}
+const listeners: Map<string, Set<Listener>> = (globalForEvents.rightreadListeners ??= new Map());
 
 /** @returns an unsubscribe function. Always call it — a leaked listener is a leaked connection. */
 export function subscribe(userId: string, listener: Listener): () => void {
