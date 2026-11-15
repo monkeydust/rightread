@@ -15,6 +15,9 @@ Two variants, because Android treats them differently:
 Rendered at 4x and downsampled, so curves are anti-aliased rather than the
 hard pixel edges the previous generator produced.
 
+A third image, the notification badge, is the mark alone in white on
+transparent: see render_badge.
+
 Run: python scripts/make-icons.py
 """
 
@@ -93,6 +96,30 @@ def render(size: int, maskable: bool) -> bytes:
     return bytes(px)
 
 
+def render_badge(size: int) -> bytes:
+    """
+    The notification badge: the small mark Android puts in the status bar.
+
+    Android ignores the colours and draws the image's alpha channel in one
+    tint, so an opaque icon shows as a filled square. This is the bookmark
+    alone, white on fully transparent, drawn larger than in the app icon
+    because nothing surrounds it.
+    """
+    scale = 1.6
+    px = bytearray()
+    for y in range(size):
+        px.append(0)  # PNG filter byte: none
+        for x in range(size):
+            mark_a = 0.0
+            for sy in range(SS):
+                for sx in range(SS):
+                    u = (x + (sx + 0.5) / SS) / size
+                    v = (y + (sy + 0.5) / SS) / size
+                    mark_a += bookmark_alpha(u, v, scale)
+            px += bytes((255, 255, 255, round(255 * mark_a / (SS * SS))))
+    return bytes(px)
+
+
 def write_png(path: str, size: int, raw: bytes) -> None:
     def chunk(tag: bytes, data: bytes) -> bytes:
         return (
@@ -122,6 +149,7 @@ def main() -> None:
 
     write_png("public/apple-touch-icon.png", 180, render(180, maskable=False))
     write_png("public/favicon.png", 32, render(32, maskable=False))
+    write_png("public/badge-96.png", 96, render_badge(96))
 
     for size in (16, 32, 128):
         write_png(

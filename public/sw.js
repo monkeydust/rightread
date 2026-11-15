@@ -20,7 +20,7 @@
 // Bump on any change to styling or markup: cached article HTML references
 // hashed CSS/font URLs, and stale HTML pointing at deleted chunks renders
 // unstyled. Activation deletes every shell/asset cache not matching this.
-const VERSION = "v34";
+const VERSION = "v35";
 
 /*
  * Downloaded articles are versioned SEPARATELY, and this is the whole point.
@@ -665,7 +665,9 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(notice.title, {
       body: notice.body,
       icon: "/icon-192.png",
-      badge: "/icon-192.png",
+      // The status-bar mark. Android draws only its alpha channel, so it has
+      // to be a shape on transparent; the app icon there shows as a square.
+      badge: "/badge-96.png",
       // Same tag replaces the earlier notification (a link shared twice);
       // renotify makes the replacement audible like any other.
       tag: notice.tag,

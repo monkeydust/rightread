@@ -13,6 +13,7 @@
 
 import { readFileSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";
+import { inflateSync } from "node:zlib";
 
 let failed = 0;
 function check(name: string, ok: boolean, detail = "") {
@@ -67,6 +68,8 @@ type Opts = { redirected?: boolean; ok?: boolean; html?: string };
 function loadWorker(responses: Record<string, Opts> = {}) {
   const listeners: Record<string, (e: unknown) => void> = {};
   const fetched: string[] = [];
+  /** Every notification the worker showed, as (title, options). */
+  const shown: { title: string; options: Record<string, unknown> }[] = [];
   const cacheStore = makeCaches();
   // Flipped mid-test to model the actual scenario: precache while there is a
   // network, then read with none at all.
@@ -141,6 +144,11 @@ function loadWorker(responses: Record<string, Opts> = {}) {
       location: { origin: ORIGIN },
       skipWaiting: () => {},
       clients: { claim: () => {} },
+      registration: {
+        showNotification: async (title: string, options: Record<string, unknown>) => {
+          shown.push({ title, options });
+        },
+      },
     },
     caches: cacheStore,
     fetch: fetchStub,
@@ -175,7 +183,7 @@ function loadWorker(responses: Record<string, Opts> = {}) {
 
   const context = createContext(sandbox);
   runInContext(readFileSync("public/sw.js", "utf8"), context);
-  return { listeners, fetched, cacheStore, net, mkResponse };
+  return { listeners, fetched, cacheStore, net, mkResponse, shown };
 }
 
 /** Fires a lifecycle listener (install/activate) and awaits its waitUntil. */
@@ -746,6 +754,65 @@ function documentsOf(cacheStore: ReturnType<typeof makeCaches>) {
   check("activation re-fetches the stale-build article", fetched.includes("/read/old") && fetched.includes("/read/old#rsc"), fetched.join(","));
   check("and leaves the current-build one alone", !fetched.includes("/read/fine"));
   check("the healed copy is from the new build", (await bodyOf(await pre.match("/read/old"))).includes("healed"));
+}
+
+// ── Notifications ─────────────────────────────────────────────────
+// Android's status bar draws the badge from its alpha channel alone, so the
+// badge has to be a shape on transparent. The opaque app icon there showed as
+// a plain square on the first real notification.
+{
+  const { listeners, shown } = loadWorker();
+  const push = async (data: unknown) => {
+    const pending: Promise<unknown>[] = [];
+    listeners.push({ data, waitUntil: (p: Promise<unknown>) => pending.push(p) });
+    await Promise.all(pending);
+    return shown[shown.length - 1];
+  };
+
+  const normal = await push({
+    json: () => ({ v: 1, type: "group_share", title: "Book club", body: "Pat shared: Tides", path: "/groups/g1", tag: "share-s1" }),
+  });
+  check("push: shows the message it was sent", normal?.title === "Book club" && normal.options.body === "Pat shared: Tides");
+  check("push: the badge is the monochrome mark", normal?.options.badge === "/badge-96.png", String(normal?.options.badge));
+  check("push: the icon is still the app icon", normal?.options.icon === "/icon-192.png", String(normal?.options.icon));
+
+  const unreadable = await push({
+    json: () => {
+      throw new Error("not JSON");
+    },
+  });
+  check("push: an unreadable payload still shows something", unreadable?.title === "rightread" && shown.length === 2);
+  check("push: and with the same badge", unreadable?.options.badge === "/badge-96.png", String(unreadable?.options.badge));
+
+  const empty = await push(null);
+  check("push: no payload at all uses the same badge", empty?.options.badge === "/badge-96.png" && shown.length === 3);
+
+  // The image itself: 96 by 96, white, and mostly see-through.
+  const png = readFileSync("public/badge-96.png");
+  const width = png.readUInt32BE(16);
+  const height = png.readUInt32BE(20);
+  const colourType = png[25];
+  check("badge: a 96 by 96 PNG with an alpha channel", width === 96 && height === 96 && colourType === 6, `${width}x${height} type ${colourType}`);
+  const idat = png.indexOf("IDAT");
+  const raw = inflateSync(png.subarray(idat + 4, idat + 4 + png.readUInt32BE(idat - 4)));
+  const stride = width * 4 + 1;
+  let clear = 0;
+  let solid = 0;
+  let coloured = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const at = y * stride + 1 + x * 4;
+      if (raw[at] !== 255 || raw[at + 1] !== 255 || raw[at + 2] !== 255) coloured++;
+      if (raw[at + 3] === 0) clear++;
+      else if (raw[at + 3] === 255) solid++;
+    }
+  }
+  const alphaAt = (x: number, y: number) => raw[y * stride + 1 + x * 4 + 3];
+  check("badge: every pixel is white, so only the shape shows", coloured === 0, String(coloured));
+  check("badge: the corners are transparent", [alphaAt(0, 0), alphaAt(95, 0), alphaAt(0, 95), alphaAt(95, 95)].every((a) => a === 0));
+  check("badge: the middle is solid", alphaAt(48, 40) === 255);
+  check("badge: a shape, not a filled square", clear > width * height * 0.3 && solid > width * height * 0.2, `clear=${clear} solid=${solid}`);
+  check("badge: the notch is cut out of the bottom edge", alphaAt(48, 80) === 0 && alphaAt(24, 80) === 255);
 }
 
 console.log(failed ? `\n${failed} FAILED` : `\nall passed`);
